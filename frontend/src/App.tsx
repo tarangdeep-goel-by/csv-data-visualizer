@@ -1,76 +1,21 @@
 import { useState, useEffect } from 'react'
 import { 
   Container, 
-  Paper, 
   Typography, 
-  Button, 
   Box,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  CircularProgress,
-  Stack,
-  useTheme,
-  Chip,
-  Divider,
-  IconButton,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemSecondaryAction,
-  Switch,
-  TextField,
-  InputAdornment,
-  FormControlLabel,
-  Tooltip
+  useTheme
 } from '@mui/material'
-import axios from 'axios'
-import DownloadIcon from '@mui/icons-material/Download'
-import UploadFileIcon from '@mui/icons-material/UploadFile'
 import TableChartIcon from '@mui/icons-material/TableChart'
-import SwapHorizIcon from '@mui/icons-material/SwapHoriz'
-import SearchIcon from '@mui/icons-material/Search'
-import KeyIcon from '@mui/icons-material/Key'
-import AccessTimeIcon from '@mui/icons-material/AccessTime'
-import FilterListIcon from '@mui/icons-material/FilterList'
-
-interface Metadata {
-  columns: string[]
-  row_count: number
-  column_types: Record<string, string>
-  sample_data: Record<string, any>[]
-  column_classifications: {
-    dimensions: string[]
-    metrics: string[]
-  }
-  dimension_flags: {
-    index_dimension: string
-    time_dimension: string | null
-  }
-}
-
-interface CompleteData {
-  data: Record<string, any>[]
-  total_rows: number
-}
-
-interface FilterState {
-  dimensions: string[]
-  metrics: string[]
-  filters: Record<string, any>
-}
+import axios from 'axios'
+import { Upload } from './components/Upload'
+import { Metadata } from './components/Metadata'
+import { Data } from './components/Data'
+import { Metadata as MetadataType, CompleteData, FilterState } from './components/types'
 
 function App() {
   const theme = useTheme()
   const [file, setFile] = useState<File | null>(null)
-  const [metadata, setMetadata] = useState<Metadata | null>(null)
+  const [metadata, setMetadata] = useState<MetadataType | null>(null)
   const [completeData, setCompleteData] = useState<CompleteData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -87,43 +32,70 @@ function App() {
     metrics: [],
     filters: {}
   })
-  const [pendingMetadata, setPendingMetadata] = useState<Metadata | null>(null)
+  const [pendingMetadata, setPendingMetadata] = useState<MetadataType | null>(null)
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
-      setFile(event.target.files[0])
-      setError(null)
+      const file = event.target.files[0];
+      
+      // Validate file type
+      if (!file.name.toLowerCase().endsWith('.csv')) {
+        setError('Please upload a CSV file');
+        return;
+      }
+
+      // Validate file size (e.g., max 50MB)
+      if (file.size > 50 * 1024 * 1024) {
+        setError('File size should be less than 50MB');
+        return;
+      }
+
+      setFile(file);
+      setError(null);
     }
   }
 
   const handleUpload = async () => {
     if (!file) {
-      setError('Please select a file first')
-      return
+      setError('Please select a file first');
+      return;
     }
 
-    setLoading(true)
-    const formData = new FormData()
-    formData.append('file', file)
+    setLoading(true);
+    const formData = new FormData();
+    formData.append('file', file);
 
     try {
-      const response = await axios.post('http://localhost:8000/upload', formData)
-      setMetadata(response.data)
-      setPendingMetadata(response.data)
+      const response = await axios.post('http://localhost:8000/upload', formData);
+      
+      // Only validate metrics since dimensions can be added later
+      if (response.data.column_classifications.metrics.length === 0) {
+        setError('No metric columns identified in the file. Please ensure your CSV contains at least one metric column.');
+        return;
+      }
+
+      setMetadata(response.data);
+      setPendingMetadata(response.data);
+      
       // Initialize filter state with index dimension and all metrics
       const initialFilterState = {
         dimensions: [response.data.dimension_flags.index_dimension],
         metrics: response.data.column_classifications.metrics,
         filters: {}
-      }
-      setFilterState(initialFilterState)
-      setTempFilterState(initialFilterState)
-      await fetchCompleteData(initialFilterState)
+      };
+      setFilterState(initialFilterState);
+      setTempFilterState(initialFilterState);
+      await fetchCompleteData(initialFilterState);
     } catch (err) {
-      setError('Error uploading file. Please try again.')
-      console.error(err)
+      if (axios.isAxiosError(err)) {
+        const errorMessage = err.response?.data?.detail || err.message;
+        setError(`Error uploading file: ${errorMessage}`);
+      } else {
+        setError('Error uploading file. Please try again.');
+      }
+      console.error(err);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
@@ -366,34 +338,6 @@ function App() {
     }
   };
 
-  const filteredData = completeData?.data || [];
-
-  const renderColumnHeader = (column: string) => {
-    if (!metadata) return column;
-
-    const isIndex = metadata.dimension_flags.index_dimension === column;
-    const isTime = metadata.dimension_flags.time_dimension === column;
-    const isMetric = metadata.column_classifications.metrics.includes(column);
-
-    return (
-      <Stack direction="row" spacing={1} alignItems="center">
-        <span>{column}</span>
-        <Stack direction="row" spacing={0.5}>
-          {isIndex && (
-            <Tooltip title="Index Dimension">
-              <KeyIcon sx={{ fontSize: 16, color: theme.palette.warning.main }} />
-            </Tooltip>
-          )}
-          {isTime && (
-            <Tooltip title="Time Dimension">
-              <AccessTimeIcon sx={{ fontSize: 16, color: theme.palette.info.main }} />
-            </Tooltip>
-          )}
-        </Stack>
-      </Stack>
-    );
-  };
-
   return (
     <Box sx={{ 
       minHeight: '100vh',
@@ -418,585 +362,47 @@ function App() {
           CSV Data Visualizer
         </Typography>
 
-        <Paper 
-          elevation={2}
-          sx={{ 
-            p: 4, 
-            mb: 3,
-            borderRadius: 2,
-            border: `1px solid ${theme.palette.grey[200]}`
-          }}
-        >
-          <Stack direction="row" spacing={3} alignItems="center">
-            <input
-              accept=".csv"
-              style={{ display: 'none' }}
-              id="csv-file"
-              type="file"
-              onChange={handleFileChange}
-            />
-            <label htmlFor="csv-file">
-              <Button 
-                variant="contained" 
-                component="span"
-                startIcon={<UploadFileIcon />}
-                sx={{ 
-                  py: 1.5,
-                  px: 3,
-                  borderRadius: 2,
-                  textTransform: 'none',
-                  fontSize: '1rem'
-                }}
-              >
-                Select CSV File
-              </Button>
-            </label>
-            {file && (
-              <Chip 
-                label={`Selected: ${file.name}`}
-                color="primary"
-                variant="outlined"
-                sx={{ fontSize: '0.9rem' }}
-              />
-            )}
-            <Button
-              variant="contained"
-              color="primary"
-              onClick={handleUpload}
-              disabled={!file || loading}
-              sx={{ 
-                py: 1.5,
-                px: 4,
-                borderRadius: 2,
-                textTransform: 'none',
-                fontSize: '1rem'
-              }}
-            >
-              {loading ? <CircularProgress size={24} color="inherit" /> : 'Upload'}
-            </Button>
-          </Stack>
-          {error && (
-            <Typography 
-              color="error" 
-              sx={{ 
-                mt: 2,
-                bgcolor: theme.palette.error.light,
-                color: theme.palette.error.dark,
-                p: 2,
-                borderRadius: 1
-              }}
-            >
-              {error}
-            </Typography>
-          )}
-        </Paper>
+        <Upload
+          file={file}
+          loading={loading}
+          error={error}
+          onFileChange={handleFileChange}
+          onUpload={handleUpload}
+        />
 
         {metadata && (
           <>
-            <Paper 
-              elevation={2}
-              sx={{ 
-                p: 4,
-                mb: 3,
-                borderRadius: 2,
-                border: `1px solid ${theme.palette.grey[200]}`
-              }}
-            >
-              <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
-                <Typography variant="h5" sx={{ fontWeight: 600 }}>
-                  Dataset Metadata
-                </Typography>
-                <Stack direction="row" spacing={2}>
-                  <Button
-                    variant="outlined"
-                    startIcon={<SwapHorizIcon />}
-                    onClick={() => setShowClassifications(true)}
-                    sx={{ 
-                      py: 1.5,
-                      px: 3,
-                      borderRadius: 2,
-                      textTransform: 'none'
-                    }}
-                  >
-                    Manage Classifications
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    startIcon={<DownloadIcon />}
-                    onClick={handleDownload}
-                    sx={{ 
-                      py: 1.5,
-                      px: 3,
-                      borderRadius: 2,
-                      textTransform: 'none'
-                    }}
-                  >
-                    Download CSV
-                  </Button>
-                </Stack>
-              </Stack>
+            <Metadata
+              metadata={metadata}
+              loading={loading}
+              onDownload={handleDownload}
+              onClassificationsChange={handleClassificationChange}
+              onDimensionFlagsChange={handleDimensionFlagsChange}
+              onApplyClassifications={handleApplyClassifications}
+              onApplyDimensionFlags={handleApplyDimensionFlags}
+              showClassifications={showClassifications}
+              setShowClassifications={setShowClassifications}
+              showDimensionFlags={showDimensionFlags}
+              setShowDimensionFlags={setShowDimensionFlags}
+              pendingMetadata={pendingMetadata}
+            />
 
-              <Box sx={{ mb: 4 }}>
-                <Stack direction="row" spacing={4}>
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Total Rows
-                    </Typography>
-                    <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                      {metadata.row_count.toLocaleString()}
-                    </Typography>
-                  </Box>
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Total Columns
-                    </Typography>
-                    <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                      {metadata.columns.length}
-                    </Typography>
-                  </Box>
-                </Stack>
-              </Box>
-
-              <Box sx={{ mb: 4 }}>
-                <Typography variant="body2" color="text.secondary" gutterBottom>
-                  Column Classifications
-                </Typography>
-                <Stack direction="row" spacing={2}>
-                  <Box>
-                    <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                      Dimensions ({metadata.column_classifications.dimensions.length})
-                    </Typography>
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                      {metadata.column_classifications.dimensions.map((column) => {
-                        const isIndex = metadata.dimension_flags.index_dimension === column;
-                        const isTime = metadata.dimension_flags.time_dimension === column;
-                        return (
-                          <Chip 
-                            key={column}
-                            label={
-                              <Stack direction="row" spacing={0.5} alignItems="center">
-                                <span>{column}</span>
-                                {isIndex && <KeyIcon sx={{ fontSize: 16 }} />}
-                                {isTime && <AccessTimeIcon sx={{ fontSize: 16 }} />}
-                              </Stack>
-                            }
-                            color="primary"
-                            variant="outlined"
-                            size="small"
-                            sx={{ fontSize: '0.85rem' }}
-                          />
-                        );
-                      })}
-                    </Box>
-                  </Box>
-                  <Box>
-                    <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                      Metrics ({metadata.column_classifications.metrics.length})
-                    </Typography>
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                      {metadata.column_classifications.metrics.map((column) => {
-                        const isIndex = metadata.dimension_flags.index_dimension === column;
-                        const isTime = metadata.dimension_flags.time_dimension === column;
-                        return (
-                          <Chip 
-                            key={column}
-                            label={
-                              <Stack direction="row" spacing={0.5} alignItems="center">
-                                <span>{column}</span>
-                                {isIndex && <KeyIcon sx={{ fontSize: 16 }} />}
-                                {isTime && <AccessTimeIcon sx={{ fontSize: 16 }} />}
-                              </Stack>
-                            }
-                            color="secondary"
-                            variant="outlined"
-                            size="small"
-                            sx={{ fontSize: '0.85rem' }}
-                          />
-                        );
-                      })}
-                    </Box>
-                  </Box>
-                </Stack>
-                <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    startIcon={<SwapHorizIcon />}
-                    onClick={() => setShowDimensionFlags(true)}
-                  >
-                    Manage Dimension Flags
-                  </Button>
-                  <Stack direction="row" spacing={2} alignItems="center">
-                    <Stack direction="row" spacing={0.5} alignItems="center">
-                      <KeyIcon sx={{ fontSize: 16, color: theme.palette.warning.main }} />
-                      <Typography variant="caption">Index</Typography>
-                    </Stack>
-                    <Stack direction="row" spacing={0.5} alignItems="center">
-                      <AccessTimeIcon sx={{ fontSize: 16, color: theme.palette.info.main }} />
-                      <Typography variant="caption">Time</Typography>
-                    </Stack>
-                  </Stack>
-                </Stack>
-              </Box>
-
-              <Box>
-                <Typography variant="body2" color="text.secondary" gutterBottom>
-                  Sample Data (First 5 Rows)
-                </Typography>
-                <TableContainer>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        {metadata.columns.map((column) => (
-                          <TableCell key={column}>{renderColumnHeader(column)}</TableCell>
-                        ))}
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {metadata.sample_data.map((row, index) => (
-                        <TableRow key={index}>
-                          {metadata.columns.map((column) => (
-                            <TableCell key={column}>{row[column]}</TableCell>
-                          ))}
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </Box>
-            </Paper>
-
-            <Paper 
-              elevation={2}
-              sx={{ 
-                p: 4,
-                mb: 3,
-                borderRadius: 2,
-                border: `1px solid ${theme.palette.grey[200]}`
-              }}
-            >
-              <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
-                <Typography variant="h5" sx={{ fontWeight: 600 }}>
-                  Complete Dataset {loading && <CircularProgress size={20} sx={{ ml: 2 }} />}
-                </Typography>
-                <Stack direction="row" spacing={2}>
-                  <Button
-                    variant="outlined"
-                    startIcon={<DownloadIcon />}
-                    onClick={handleDownloadFilteredView}
-                    sx={{ 
-                      py: 1.5,
-                      px: 3,
-                      borderRadius: 2,
-                      textTransform: 'none'
-                    }}
-                  >
-                    Download View
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    startIcon={<FilterListIcon />}
-                    onClick={() => {
-                      setTempFilterState(filterState);
-                      setShowFilters(true);
-                    }}
-                    sx={{ 
-                      py: 1.5,
-                      px: 3,
-                      borderRadius: 2,
-                      textTransform: 'none'
-                    }}
-                  >
-                    Manage Filters
-                  </Button>
-                </Stack>
-              </Stack>
-
-              <TableContainer 
-                sx={{ 
-                  maxHeight: 600,
-                  overflow: 'auto',
-                  '& .MuiTableCell-root': {
-                    whiteSpace: 'nowrap'
-                  }
-                }}
-              >
-                <Table size="small" stickyHeader>
-                  <TableHead>
-                    <TableRow>
-                      {[...filterState.dimensions, ...filterState.metrics].map((column) => (
-                        <TableCell 
-                          key={column}
-                          sx={{
-                            backgroundColor: theme.palette.background.paper,
-                            position: 'sticky',
-                            top: 0,
-                            zIndex: 1
-                          }}
-                        >
-                          <Stack direction="row" spacing={1} alignItems="center">
-                            {renderColumnHeader(column)}
-                            {column !== metadata?.dimension_flags.index_dimension && (
-                              <Tooltip title="Remove from view">
-                                <IconButton
-                                  size="small"
-                                  onClick={() => handleRemoveFromView(column)}
-                                  color="primary"
-                                >
-                                  <FilterListIcon fontSize="small" />
-                                </IconButton>
-                              </Tooltip>
-                            )}
-                          </Stack>
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {filteredData.map((row, index) => (
-                      <TableRow key={index}>
-                        {[...filterState.dimensions, ...filterState.metrics].map((column) => (
-                          <TableCell key={column}>{row[column]}</TableCell>
-                        ))}
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </Paper>
+            <Data
+              metadata={metadata}
+              completeData={completeData}
+              loading={loading}
+              filterState={filterState}
+              onDownloadFilteredView={handleDownloadFilteredView}
+              onRemoveFromView={handleRemoveFromView}
+              onAddToView={handleAddToView}
+              onApplyFilters={handleApplyFilters}
+              showFilters={showFilters}
+              setShowFilters={setShowFilters}
+              tempFilterState={tempFilterState}
+              setTempFilterState={setTempFilterState}
+            />
           </>
         )}
-
-        <Dialog 
-          open={showClassifications} 
-          onClose={() => {
-            setShowClassifications(false);
-            setPendingMetadata(metadata);
-            setTempFilterState(filterState);
-          }}
-          maxWidth="sm"
-          fullWidth
-        >
-          <DialogTitle>Manage Column Classifications</DialogTitle>
-          <DialogContent>
-            <List>
-              {metadata?.columns.map((column) => (
-                <ListItem key={column}>
-                  <ListItemText 
-                    primary={column}
-                    secondary={metadata.column_types[column]}
-                  />
-                  <ListItemSecondaryAction>
-                    <Switch
-                      edge="end"
-                      checked={pendingMetadata?.column_classifications.metrics.includes(column)}
-                      onChange={(e) => handleClassificationChange(column, e.target.checked)}
-                    />
-                  </ListItemSecondaryAction>
-                </ListItem>
-              ))}
-            </List>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => {
-              setShowClassifications(false);
-              setPendingMetadata(metadata);
-              setTempFilterState(filterState);
-            }}>
-              Cancel
-            </Button>
-            <Button 
-              variant="contained"
-              onClick={handleApplyClassifications}
-              disabled={loading}
-            >
-              {loading ? <CircularProgress size={24} /> : 'Apply Changes'}
-            </Button>
-          </DialogActions>
-        </Dialog>
-
-        <Dialog 
-          open={showDimensionFlags} 
-          onClose={() => {
-            setShowDimensionFlags(false);
-            setPendingMetadata(metadata);
-            setTempFilterState(filterState);
-          }}
-          maxWidth="sm"
-          fullWidth
-        >
-          <DialogTitle>Manage Dimension Flags</DialogTitle>
-          <DialogContent>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Select columns to be used as index and time dimensions. Any column can be used for these purposes, regardless of its classification.
-            </Typography>
-            <List>
-              {metadata?.columns.map((column) => {
-                const isMetric = pendingMetadata?.column_classifications.metrics.includes(column);
-                return (
-                  <ListItem key={column}>
-                    <ListItemText 
-                      primary={
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <span>{column}</span>
-                          <Chip 
-                            label={isMetric ? "Metric" : "Dimension"} 
-                            size="small" 
-                            color={isMetric ? "secondary" : "primary"}
-                            variant="outlined"
-                          />
-                        </Stack>
-                      }
-                      secondary={metadata.column_types[column]}
-                    />
-                    <Stack direction="row" spacing={2}>
-                      <FormControlLabel
-                        control={
-                          <Switch
-                            checked={pendingMetadata?.dimension_flags.index_dimension === column}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                handleDimensionFlagsChange(column, pendingMetadata?.dimension_flags.time_dimension || null)
-                              }
-                            }}
-                          />
-                        }
-                        label="Index"
-                      />
-                      <FormControlLabel
-                        control={
-                          <Switch
-                            checked={pendingMetadata?.dimension_flags.time_dimension === column}
-                            onChange={(e) => {
-                              handleDimensionFlagsChange(
-                                pendingMetadata?.dimension_flags.index_dimension || column,
-                                e.target.checked ? column : null
-                              )
-                            }}
-                          />
-                        }
-                        label="Time"
-                      />
-                    </Stack>
-                  </ListItem>
-                );
-              })}
-            </List>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-              Note: Index dimension is required and cannot be unset. To change it, select a different column as index.
-            </Typography>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => {
-              setShowDimensionFlags(false);
-              setPendingMetadata(metadata);
-              setTempFilterState(filterState);
-            }}>
-              Cancel
-            </Button>
-            <Button 
-              variant="contained"
-              onClick={handleApplyDimensionFlags}
-              disabled={loading}
-            >
-              {loading ? <CircularProgress size={24} /> : 'Apply Changes'}
-            </Button>
-          </DialogActions>
-        </Dialog>
-
-        <Dialog 
-          open={showFilters} 
-          onClose={() => setShowFilters(false)}
-          maxWidth="md"
-          fullWidth
-        >
-          <DialogTitle>Manage Filters and Aggregation</DialogTitle>
-          <DialogContent>
-            <Stack spacing={3} sx={{ mt: 2 }}>
-              <Box>
-                <Typography variant="subtitle1" gutterBottom>
-                  Selected Dimensions
-                </Typography>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                  {tempFilterState.dimensions.map((dimension) => (
-                    <Chip
-                      key={dimension}
-                      label={dimension}
-                      onDelete={dimension !== metadata?.dimension_flags.index_dimension ? 
-                        () => handleRemoveFromView(dimension) : undefined}
-                      color="primary"
-                      variant="outlined"
-                    />
-                  ))}
-                </Box>
-              </Box>
-
-              <Box>
-                <Stack direction="row" justifyContent="space-between" alignItems="center">
-                  <Typography variant="subtitle1" gutterBottom>
-                    Selected Metrics
-                  </Typography>
-                  <Button
-                    size="small"
-                    onClick={() => {
-                      if (metadata) {
-                        setTempFilterState(prev => ({
-                          ...prev,
-                          metrics: metadata.column_classifications.metrics
-                        }));
-                      }
-                    }}
-                  >
-                    Select All Metrics
-                  </Button>
-                </Stack>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                  {tempFilterState.metrics.map((metric) => (
-                    <Chip
-                      key={metric}
-                      label={metric}
-                      onDelete={() => handleRemoveFromView(metric)}
-                      color="secondary"
-                      variant="outlined"
-                    />
-                  ))}
-                </Box>
-              </Box>
-
-              <Box>
-                <Typography variant="subtitle1" gutterBottom>
-                  Available Columns
-                </Typography>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                  {metadata?.columns
-                    .filter(col => !tempFilterState.dimensions.includes(col) && !tempFilterState.metrics.includes(col))
-                    .map((column) => {
-                      const isMetric = metadata.column_classifications.metrics.includes(column);
-                      return (
-                        <Chip
-                          key={column}
-                          label={column}
-                          onClick={() => handleAddToView(column)}
-                          color={isMetric ? "secondary" : "primary"}
-                          variant="outlined"
-                        />
-                      );
-                    })}
-                </Box>
-              </Box>
-            </Stack>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setShowFilters(false)}>Cancel</Button>
-            <Button 
-              variant="contained" 
-              onClick={handleApplyFilters}
-              disabled={loading}
-            >
-              {loading ? <CircularProgress size={24} /> : 'Apply Filters'}
-            </Button>
-          </DialogActions>
-        </Dialog>
       </Container>
     </Box>
   )
