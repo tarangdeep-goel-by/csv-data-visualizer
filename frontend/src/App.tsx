@@ -39,6 +39,7 @@ import SwapHorizIcon from '@mui/icons-material/SwapHoriz'
 import SearchIcon from '@mui/icons-material/Search'
 import KeyIcon from '@mui/icons-material/Key'
 import AccessTimeIcon from '@mui/icons-material/AccessTime'
+import FilterListIcon from '@mui/icons-material/FilterList'
 
 interface Metadata {
   columns: string[]
@@ -60,6 +61,12 @@ interface CompleteData {
   total_rows: number
 }
 
+interface FilterState {
+  dimensions: string[]
+  metrics: string[]
+  filters: Record<string, any>
+}
+
 function App() {
   const theme = useTheme()
   const [file, setFile] = useState<File | null>(null)
@@ -68,10 +75,19 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showClassifications, setShowClassifications] = useState(false)
-  const [searchTerm, setSearchTerm] = useState('')
-  const [page, setPage] = useState(0)
-  const [rowsPerPage] = useState(10)
   const [showDimensionFlags, setShowDimensionFlags] = useState(false)
+  const [showFilters, setShowFilters] = useState(false)
+  const [filterState, setFilterState] = useState<FilterState>({
+    dimensions: [],
+    metrics: [],
+    filters: {}
+  })
+  const [tempFilterState, setTempFilterState] = useState<FilterState>({
+    dimensions: [],
+    metrics: [],
+    filters: {}
+  })
+  const [pendingMetadata, setPendingMetadata] = useState<Metadata | null>(null)
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
@@ -93,7 +109,16 @@ function App() {
     try {
       const response = await axios.post('http://localhost:8000/upload', formData)
       setMetadata(response.data)
-      await fetchCompleteData()
+      setPendingMetadata(response.data)
+      // Initialize filter state with index dimension and all metrics
+      const initialFilterState = {
+        dimensions: [response.data.dimension_flags.index_dimension],
+        metrics: response.data.column_classifications.metrics,
+        filters: {}
+      }
+      setFilterState(initialFilterState)
+      setTempFilterState(initialFilterState)
+      await fetchCompleteData(initialFilterState)
     } catch (err) {
       setError('Error uploading file. Please try again.')
       console.error(err)
@@ -102,12 +127,24 @@ function App() {
     }
   }
 
-  const fetchCompleteData = async () => {
+  const fetchCompleteData = async (filterData?: FilterState) => {
     try {
-      const response = await axios.get('http://localhost:8000/data')
+      setLoading(true)
+      const dataToSend = filterData || filterState
+      console.log('Sending filter request:', dataToSend)
+      const response = await axios.post('http://localhost:8000/data/filter', dataToSend)
+      console.log('Received response:', response.data)
       setCompleteData(response.data)
+      setError(null)
     } catch (err) {
       console.error('Error fetching complete data:', err)
+      if (axios.isAxiosError(err)) {
+        setError(`Error fetching data: ${err.response?.data?.detail || err.message}`)
+      } else {
+        setError('Error fetching data. Please try again.')
+      }
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -134,55 +171,202 @@ function App() {
   }
 
   const handleClassificationChange = async (column: string, isMetric: boolean) => {
-    if (!metadata) return
+    if (!metadata || !pendingMetadata) return;
 
     const newClassifications = {
-      dimensions: [...metadata.column_classifications.dimensions],
-      metrics: [...metadata.column_classifications.metrics]
-    }
+      dimensions: [...pendingMetadata.column_classifications.dimensions],
+      metrics: [...pendingMetadata.column_classifications.metrics]
+    };
 
     if (isMetric) {
-      newClassifications.metrics.push(column)
-      newClassifications.dimensions = newClassifications.dimensions.filter(c => c !== column)
+      newClassifications.metrics.push(column);
+      newClassifications.dimensions = newClassifications.dimensions.filter(c => c !== column);
     } else {
-      newClassifications.dimensions.push(column)
-      newClassifications.metrics = newClassifications.metrics.filter(c => c !== column)
+      newClassifications.dimensions.push(column);
+      newClassifications.metrics = newClassifications.metrics.filter(c => c !== column);
     }
 
+    // Update pending metadata with new classifications
+    const updatedPendingMetadata = {
+      ...pendingMetadata,
+      column_classifications: newClassifications
+    };
+    setPendingMetadata(updatedPendingMetadata);
+
+    // Reset temp filter state to include index dimension and all metrics
+    setTempFilterState({
+      dimensions: [pendingMetadata.dimension_flags.index_dimension],
+      metrics: newClassifications.metrics,
+      filters: {}
+    });
+  };
+
+  const handleApplyClassifications = async () => {
+    if (!pendingMetadata) return;
+
     try {
-      const response = await axios.put('http://localhost:8000/metadata/classifications', newClassifications)
-      setMetadata(response.data)
+      setLoading(true);
+      const response = await axios.put(
+        'http://localhost:8000/metadata/classifications',
+        pendingMetadata.column_classifications
+      );
+      setMetadata(response.data);
+      setPendingMetadata(response.data);
+      
+      // Create new filter state with index dimension and all metrics
+      const newFilterState = {
+        dimensions: [response.data.dimension_flags.index_dimension],
+        metrics: response.data.column_classifications.metrics,
+        filters: {}
+      };
+      
+      // Apply filter changes
+      setFilterState(newFilterState);
+      setTempFilterState(newFilterState);
+      await fetchCompleteData(newFilterState);
+      setShowClassifications(false);
     } catch (err) {
-      setError('Error updating classifications. Please try again.')
-      console.error(err)
+      setError('Error updating classifications. Please try again.');
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
-  }
+  };
 
   const handleDimensionFlagsChange = async (indexDimension: string, timeDimension: string | null) => {
-    if (!metadata) return
+    if (!metadata || !pendingMetadata) return;
+
+    const newFlags = {
+      index_dimension: indexDimension,
+      time_dimension: timeDimension
+    };
+
+    // Update pending metadata
+    setPendingMetadata({
+      ...pendingMetadata,
+      dimension_flags: newFlags
+    });
+
+    // Update temp filter state to include new index dimension and all metrics
+    setTempFilterState({
+      dimensions: [indexDimension],
+      metrics: pendingMetadata.column_classifications.metrics,
+      filters: {}
+    });
+  };
+
+  const handleApplyDimensionFlags = async () => {
+    if (!pendingMetadata) return;
 
     try {
-      const response = await axios.put('http://localhost:8000/metadata/dimension-flags', {
-        index_dimension: indexDimension,
-        time_dimension: timeDimension || undefined
-      })
-      setMetadata(response.data)
-      setError(null)
+      setLoading(true);
+      const response = await axios.put(
+        'http://localhost:8000/metadata/dimension-flags',
+        pendingMetadata.dimension_flags
+      );
+      setMetadata(response.data);
+      setPendingMetadata(response.data);
+      
+      // Create new filter state with new index dimension and all metrics
+      const newFilterState = {
+        dimensions: [response.data.dimension_flags.index_dimension],
+        metrics: response.data.column_classifications.metrics,
+        filters: {}
+      };
+      
+      // Apply filter changes
+      setFilterState(newFilterState);
+      setTempFilterState(newFilterState);
+      await fetchCompleteData(newFilterState);
+      setShowDimensionFlags(false);
     } catch (err) {
       if (axios.isAxiosError(err)) {
-        setError(`Error updating dimension flags: ${err.response?.data?.detail || err.message}`)
+        setError(`Error updating dimension flags: ${err.response?.data?.detail || err.message}`);
       } else {
-        setError('Error updating dimension flags. Please try again.')
+        setError('Error updating dimension flags. Please try again.');
       }
-      console.error(err)
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
-  }
+  };
 
-  const filteredData = completeData?.data.filter(row => 
-    Object.values(row).some(value => 
-      String(value).toLowerCase().includes(searchTerm.toLowerCase())
-    )
-  ) || []
+  const handleRemoveFromView = async (column: string) => {
+    if (!metadata) return;
+    
+    // Don't allow removing index dimension
+    if (column === metadata.dimension_flags.index_dimension) return;
+
+    // Create new filter state without the removed column
+    const newFilterState = {
+      ...filterState,
+      dimensions: filterState.dimensions.filter(d => d !== column),
+      metrics: filterState.metrics.filter(m => m !== column)
+    };
+
+    // Update both states
+    setFilterState(newFilterState);
+    setTempFilterState(newFilterState);
+
+    // Immediately fetch new data
+    await fetchCompleteData(newFilterState);
+  };
+
+  const handleApplyFilters = async () => {
+    setFilterState(tempFilterState);
+    try {
+      setLoading(true);
+      const response = await axios.post('http://localhost:8000/data/filter', tempFilterState);
+      setCompleteData(response.data);
+      setError(null);
+      setShowFilters(false);
+    } catch (err) {
+      console.error('Error fetching data:', err);
+      if (axios.isAxiosError(err)) {
+        setError(`Error fetching data: ${err.response?.data?.detail || err.message}`);
+      } else {
+        setError('Error fetching data. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddToView = (column: string) => {
+    if (!metadata) return;
+    
+    const isMetric = metadata.column_classifications.metrics.includes(column);
+    // Only update the temporary filter state
+    setTempFilterState(prev => ({
+      ...prev,
+      dimensions: isMetric ? prev.dimensions : [...prev.dimensions, column],
+      metrics: isMetric ? [...prev.metrics, column] : prev.metrics
+    }));
+  };
+
+  const handleDownloadFilteredView = async () => {
+    try {
+      const response = await axios.post('http://localhost:8000/data/download', filterState, {
+        responseType: 'blob'
+      });
+      
+      const blob = new Blob([response.data], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'filtered_data.csv';
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError('Error downloading filtered data. Please try again.');
+      console.error(err);
+    }
+  };
+
+  const filteredData = completeData?.data || [];
 
   const renderColumnHeader = (column: string) => {
     if (!metadata) return column;
@@ -486,49 +670,96 @@ function App() {
               elevation={2}
               sx={{ 
                 p: 4,
+                mb: 3,
                 borderRadius: 2,
                 border: `1px solid ${theme.palette.grey[200]}`
               }}
             >
               <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
                 <Typography variant="h5" sx={{ fontWeight: 600 }}>
-                  Complete Dataset
+                  Complete Dataset {loading && <CircularProgress size={20} sx={{ ml: 2 }} />}
                 </Typography>
-                <TextField
-                  size="small"
-                  placeholder="Search..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <SearchIcon />
-                      </InputAdornment>
-                    ),
-                  }}
-                  sx={{ width: 300 }}
-                />
+                <Stack direction="row" spacing={2}>
+                  <Button
+                    variant="outlined"
+                    startIcon={<DownloadIcon />}
+                    onClick={handleDownloadFilteredView}
+                    sx={{ 
+                      py: 1.5,
+                      px: 3,
+                      borderRadius: 2,
+                      textTransform: 'none'
+                    }}
+                  >
+                    Download View
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    startIcon={<FilterListIcon />}
+                    onClick={() => {
+                      setTempFilterState(filterState);
+                      setShowFilters(true);
+                    }}
+                    sx={{ 
+                      py: 1.5,
+                      px: 3,
+                      borderRadius: 2,
+                      textTransform: 'none'
+                    }}
+                  >
+                    Manage Filters
+                  </Button>
+                </Stack>
               </Stack>
 
-              <TableContainer>
-                <Table size="small">
+              <TableContainer 
+                sx={{ 
+                  maxHeight: 600,
+                  overflow: 'auto',
+                  '& .MuiTableCell-root': {
+                    whiteSpace: 'nowrap'
+                  }
+                }}
+              >
+                <Table size="small" stickyHeader>
                   <TableHead>
                     <TableRow>
-                      {metadata.columns.map((column) => (
-                        <TableCell key={column}>{renderColumnHeader(column)}</TableCell>
+                      {[...filterState.dimensions, ...filterState.metrics].map((column) => (
+                        <TableCell 
+                          key={column}
+                          sx={{
+                            backgroundColor: theme.palette.background.paper,
+                            position: 'sticky',
+                            top: 0,
+                            zIndex: 1
+                          }}
+                        >
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            {renderColumnHeader(column)}
+                            {column !== metadata?.dimension_flags.index_dimension && (
+                              <Tooltip title="Remove from view">
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleRemoveFromView(column)}
+                                  color="primary"
+                                >
+                                  <FilterListIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                          </Stack>
+                        </TableCell>
                       ))}
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {filteredData
-                      .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-                      .map((row, index) => (
-                        <TableRow key={index}>
-                          {metadata.columns.map((column) => (
-                            <TableCell key={column}>{row[column]}</TableCell>
-                          ))}
-                        </TableRow>
-                      ))}
+                    {filteredData.map((row, index) => (
+                      <TableRow key={index}>
+                        {[...filterState.dimensions, ...filterState.metrics].map((column) => (
+                          <TableCell key={column}>{row[column]}</TableCell>
+                        ))}
+                      </TableRow>
+                    ))}
                   </TableBody>
                 </Table>
               </TableContainer>
@@ -538,7 +769,11 @@ function App() {
 
         <Dialog 
           open={showClassifications} 
-          onClose={() => setShowClassifications(false)}
+          onClose={() => {
+            setShowClassifications(false);
+            setPendingMetadata(metadata);
+            setTempFilterState(filterState);
+          }}
           maxWidth="sm"
           fullWidth
         >
@@ -554,7 +789,7 @@ function App() {
                   <ListItemSecondaryAction>
                     <Switch
                       edge="end"
-                      checked={metadata.column_classifications.metrics.includes(column)}
+                      checked={pendingMetadata?.column_classifications.metrics.includes(column)}
                       onChange={(e) => handleClassificationChange(column, e.target.checked)}
                     />
                   </ListItemSecondaryAction>
@@ -563,13 +798,30 @@ function App() {
             </List>
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setShowClassifications(false)}>Close</Button>
+            <Button onClick={() => {
+              setShowClassifications(false);
+              setPendingMetadata(metadata);
+              setTempFilterState(filterState);
+            }}>
+              Cancel
+            </Button>
+            <Button 
+              variant="contained"
+              onClick={handleApplyClassifications}
+              disabled={loading}
+            >
+              {loading ? <CircularProgress size={24} /> : 'Apply Changes'}
+            </Button>
           </DialogActions>
         </Dialog>
 
         <Dialog 
           open={showDimensionFlags} 
-          onClose={() => setShowDimensionFlags(false)}
+          onClose={() => {
+            setShowDimensionFlags(false);
+            setPendingMetadata(metadata);
+            setTempFilterState(filterState);
+          }}
           maxWidth="sm"
           fullWidth
         >
@@ -580,7 +832,7 @@ function App() {
             </Typography>
             <List>
               {metadata?.columns.map((column) => {
-                const isMetric = metadata.column_classifications.metrics.includes(column);
+                const isMetric = pendingMetadata?.column_classifications.metrics.includes(column);
                 return (
                   <ListItem key={column}>
                     <ListItemText 
@@ -601,10 +853,10 @@ function App() {
                       <FormControlLabel
                         control={
                           <Switch
-                            checked={metadata.dimension_flags.index_dimension === column}
+                            checked={pendingMetadata?.dimension_flags.index_dimension === column}
                             onChange={(e) => {
                               if (e.target.checked) {
-                                handleDimensionFlagsChange(column, metadata.dimension_flags.time_dimension)
+                                handleDimensionFlagsChange(column, pendingMetadata?.dimension_flags.time_dimension || null)
                               }
                             }}
                           />
@@ -614,10 +866,10 @@ function App() {
                       <FormControlLabel
                         control={
                           <Switch
-                            checked={metadata.dimension_flags.time_dimension === column}
+                            checked={pendingMetadata?.dimension_flags.time_dimension === column}
                             onChange={(e) => {
                               handleDimensionFlagsChange(
-                                metadata.dimension_flags.index_dimension,
+                                pendingMetadata?.dimension_flags.index_dimension || column,
                                 e.target.checked ? column : null
                               )
                             }}
@@ -635,7 +887,114 @@ function App() {
             </Typography>
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setShowDimensionFlags(false)}>Close</Button>
+            <Button onClick={() => {
+              setShowDimensionFlags(false);
+              setPendingMetadata(metadata);
+              setTempFilterState(filterState);
+            }}>
+              Cancel
+            </Button>
+            <Button 
+              variant="contained"
+              onClick={handleApplyDimensionFlags}
+              disabled={loading}
+            >
+              {loading ? <CircularProgress size={24} /> : 'Apply Changes'}
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        <Dialog 
+          open={showFilters} 
+          onClose={() => setShowFilters(false)}
+          maxWidth="md"
+          fullWidth
+        >
+          <DialogTitle>Manage Filters and Aggregation</DialogTitle>
+          <DialogContent>
+            <Stack spacing={3} sx={{ mt: 2 }}>
+              <Box>
+                <Typography variant="subtitle1" gutterBottom>
+                  Selected Dimensions
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {tempFilterState.dimensions.map((dimension) => (
+                    <Chip
+                      key={dimension}
+                      label={dimension}
+                      onDelete={dimension !== metadata?.dimension_flags.index_dimension ? 
+                        () => handleRemoveFromView(dimension) : undefined}
+                      color="primary"
+                      variant="outlined"
+                    />
+                  ))}
+                </Box>
+              </Box>
+
+              <Box>
+                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                  <Typography variant="subtitle1" gutterBottom>
+                    Selected Metrics
+                  </Typography>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      if (metadata) {
+                        setTempFilterState(prev => ({
+                          ...prev,
+                          metrics: metadata.column_classifications.metrics
+                        }));
+                      }
+                    }}
+                  >
+                    Select All Metrics
+                  </Button>
+                </Stack>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {tempFilterState.metrics.map((metric) => (
+                    <Chip
+                      key={metric}
+                      label={metric}
+                      onDelete={() => handleRemoveFromView(metric)}
+                      color="secondary"
+                      variant="outlined"
+                    />
+                  ))}
+                </Box>
+              </Box>
+
+              <Box>
+                <Typography variant="subtitle1" gutterBottom>
+                  Available Columns
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {metadata?.columns
+                    .filter(col => !tempFilterState.dimensions.includes(col) && !tempFilterState.metrics.includes(col))
+                    .map((column) => {
+                      const isMetric = metadata.column_classifications.metrics.includes(column);
+                      return (
+                        <Chip
+                          key={column}
+                          label={column}
+                          onClick={() => handleAddToView(column)}
+                          color={isMetric ? "secondary" : "primary"}
+                          variant="outlined"
+                        />
+                      );
+                    })}
+                </Box>
+              </Box>
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setShowFilters(false)}>Cancel</Button>
+            <Button 
+              variant="contained" 
+              onClick={handleApplyFilters}
+              disabled={loading}
+            >
+              {loading ? <CircularProgress size={24} /> : 'Apply Filters'}
+            </Button>
           </DialogActions>
         </Dialog>
       </Container>
@@ -644,3 +1003,4 @@ function App() {
 }
 
 export default App
+

@@ -1,21 +1,23 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 import pandas as pd
 import os
 from typing import Dict, Any, List, Optional
 import json
 from pydantic import BaseModel
+from io import StringIO
 
 app = FastAPI()
 
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=["http://localhost:5173"],  # Frontend URL
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
 
 # Create data directory if it doesn't exist
@@ -24,6 +26,11 @@ os.makedirs("data", exist_ok=True)
 class DimensionFlags(BaseModel):
     index_dimension: str
     time_dimension: Optional[str] = None
+
+class FilterRequest(BaseModel):
+    dimensions: List[str]
+    metrics: List[str]
+    filters: Dict[str, Any]
 
 def classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
     """Classify columns as dimensions (string) or metrics (numeric)."""
@@ -44,6 +51,33 @@ def classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
 def get_default_index_dimension(dimensions: List[str]) -> str:
     """Get the first dimension as the default index dimension."""
     return dimensions[0] if dimensions else None
+
+def aggregate_data(df: pd.DataFrame, dimensions: List[str], metrics: List[str]) -> pd.DataFrame:
+    """Aggregate data based on specified dimensions and metrics."""
+    if not dimensions:
+        return df
+    
+    # Group by dimensions and aggregate metrics
+    agg_dict = {metric: 'sum' for metric in metrics}
+    return df.groupby(dimensions).agg(agg_dict).reset_index()
+
+def apply_filters(df: pd.DataFrame, filters: Dict[str, Any]) -> pd.DataFrame:
+    """Apply filters to the dataframe."""
+    if not filters:
+        return df
+    
+    for column, value in filters.items():
+        if isinstance(value, list):
+            df = df[df[column].isin(value)]
+        elif isinstance(value, dict):
+            if 'min' in value:
+                df = df[df[column] >= value['min']]
+            if 'max' in value:
+                df = df[df[column] <= value['max']]
+        else:
+            df = df[df[column] == value]
+    
+    return df
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)) -> Dict[str, Any]:
@@ -177,4 +211,85 @@ async def download_file():
         media_type="text/csv",
         filename="data.csv",
         headers={"Content-Disposition": "attachment; filename=data.csv"}
-    ) 
+    )
+
+@app.post("/data/filter")
+async def filter_data(request: FilterRequest) -> Dict[str, Any]:
+    file_path = os.path.join("data", "original_data.csv")
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="No data file found")
+    
+    df = pd.read_csv(file_path)
+    
+    # If no dimensions selected, return empty result
+    if not request.dimensions:
+        return {
+            "data": [],
+            "total_rows": 0
+        }
+    
+    # Apply filters first if any
+    if request.filters:
+        df = apply_filters(df, request.filters)
+    
+    # Ensure all requested dimensions exist in dataframe
+    all_columns = set(df.columns)
+    requested_columns = set(request.dimensions + request.metrics)
+    if not requested_columns.issubset(all_columns):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid columns requested"
+        )
+    
+    # Group by dimensions and aggregate metrics
+    if request.metrics:
+        agg_dict = {metric: 'sum' for metric in request.metrics}
+        df = df.groupby(request.dimensions, as_index=False).agg(agg_dict)
+    else:
+        # If no metrics, just get unique combinations of dimensions
+        df = df[request.dimensions].drop_duplicates()
+    
+    return {
+        "data": df.to_dict(orient="records"),
+        "total_rows": len(df)
+    }
+
+@app.post("/data/download")
+async def download_filtered_data(filter_request: FilterRequest):
+    try:
+        # Get the filtered data using the same logic as /data/filter
+        file_path = os.path.join("data", "original_data.csv")
+        
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="No data file found")
+            
+        df = pd.read_csv(file_path)
+        
+        # Apply dimension and metric filtering
+        selected_columns = filter_request.dimensions + filter_request.metrics
+        df_filtered = df[selected_columns]
+        
+        # Group by dimensions if any
+        if filter_request.dimensions:
+            # Calculate aggregates for metrics
+            aggs = {metric: 'sum' for metric in filter_request.metrics}
+            df_filtered = df_filtered.groupby(filter_request.dimensions, as_index=False).agg(aggs)
+        
+        # Convert filtered DataFrame to CSV
+        output = StringIO()
+        df_filtered.to_csv(output, index=False)
+        
+        # Create response with CSV file
+        response = StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={
+                'Content-Disposition': 'attachment; filename=filtered_data.csv'
+            }
+        )
+        
+        return response
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) 
