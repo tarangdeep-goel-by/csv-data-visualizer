@@ -27,7 +27,9 @@ import {
   ListItemSecondaryAction,
   Switch,
   TextField,
-  InputAdornment
+  InputAdornment,
+  FormControlLabel,
+  Tooltip
 } from '@mui/material'
 import axios from 'axios'
 import DownloadIcon from '@mui/icons-material/Download'
@@ -35,6 +37,8 @@ import UploadFileIcon from '@mui/icons-material/UploadFile'
 import TableChartIcon from '@mui/icons-material/TableChart'
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz'
 import SearchIcon from '@mui/icons-material/Search'
+import KeyIcon from '@mui/icons-material/Key'
+import AccessTimeIcon from '@mui/icons-material/AccessTime'
 
 interface Metadata {
   columns: string[]
@@ -44,6 +48,10 @@ interface Metadata {
   column_classifications: {
     dimensions: string[]
     metrics: string[]
+  }
+  dimension_flags: {
+    index_dimension: string
+    time_dimension: string | null
   }
 }
 
@@ -63,6 +71,7 @@ function App() {
   const [searchTerm, setSearchTerm] = useState('')
   const [page, setPage] = useState(0)
   const [rowsPerPage] = useState(10)
+  const [showDimensionFlags, setShowDimensionFlags] = useState(false)
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
@@ -149,11 +158,57 @@ function App() {
     }
   }
 
+  const handleDimensionFlagsChange = async (indexDimension: string, timeDimension: string | null) => {
+    if (!metadata) return
+
+    try {
+      const response = await axios.put('http://localhost:8000/metadata/dimension-flags', {
+        index_dimension: indexDimension,
+        time_dimension: timeDimension || undefined
+      })
+      setMetadata(response.data)
+      setError(null)
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        setError(`Error updating dimension flags: ${err.response?.data?.detail || err.message}`)
+      } else {
+        setError('Error updating dimension flags. Please try again.')
+      }
+      console.error(err)
+    }
+  }
+
   const filteredData = completeData?.data.filter(row => 
     Object.values(row).some(value => 
       String(value).toLowerCase().includes(searchTerm.toLowerCase())
     )
   ) || []
+
+  const renderColumnHeader = (column: string) => {
+    if (!metadata) return column;
+
+    const isIndex = metadata.dimension_flags.index_dimension === column;
+    const isTime = metadata.dimension_flags.time_dimension === column;
+    const isMetric = metadata.column_classifications.metrics.includes(column);
+
+    return (
+      <Stack direction="row" spacing={1} alignItems="center">
+        <span>{column}</span>
+        <Stack direction="row" spacing={0.5}>
+          {isIndex && (
+            <Tooltip title="Index Dimension">
+              <KeyIcon sx={{ fontSize: 16, color: theme.palette.warning.main }} />
+            </Tooltip>
+          )}
+          {isTime && (
+            <Tooltip title="Time Dimension">
+              <AccessTimeIcon sx={{ fontSize: 16, color: theme.palette.info.main }} />
+            </Tooltip>
+          )}
+        </Stack>
+      </Stack>
+    );
+  };
 
   return (
     <Box sx={{ 
@@ -328,16 +383,26 @@ function App() {
                       Dimensions ({metadata.column_classifications.dimensions.length})
                     </Typography>
                     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                      {metadata.column_classifications.dimensions.map((column) => (
-                        <Chip 
-                          key={column}
-                          label={column}
-                          color="primary"
-                          variant="outlined"
-                          size="small"
-                          sx={{ fontSize: '0.85rem' }}
-                        />
-                      ))}
+                      {metadata.column_classifications.dimensions.map((column) => {
+                        const isIndex = metadata.dimension_flags.index_dimension === column;
+                        const isTime = metadata.dimension_flags.time_dimension === column;
+                        return (
+                          <Chip 
+                            key={column}
+                            label={
+                              <Stack direction="row" spacing={0.5} alignItems="center">
+                                <span>{column}</span>
+                                {isIndex && <KeyIcon sx={{ fontSize: 16 }} />}
+                                {isTime && <AccessTimeIcon sx={{ fontSize: 16 }} />}
+                              </Stack>
+                            }
+                            color="primary"
+                            variant="outlined"
+                            size="small"
+                            sx={{ fontSize: '0.85rem' }}
+                          />
+                        );
+                      })}
                     </Box>
                   </Box>
                   <Box>
@@ -345,18 +410,48 @@ function App() {
                       Metrics ({metadata.column_classifications.metrics.length})
                     </Typography>
                     <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                      {metadata.column_classifications.metrics.map((column) => (
-                        <Chip 
-                          key={column}
-                          label={column}
-                          color="secondary"
-                          variant="outlined"
-                          size="small"
-                          sx={{ fontSize: '0.85rem' }}
-                        />
-                      ))}
+                      {metadata.column_classifications.metrics.map((column) => {
+                        const isIndex = metadata.dimension_flags.index_dimension === column;
+                        const isTime = metadata.dimension_flags.time_dimension === column;
+                        return (
+                          <Chip 
+                            key={column}
+                            label={
+                              <Stack direction="row" spacing={0.5} alignItems="center">
+                                <span>{column}</span>
+                                {isIndex && <KeyIcon sx={{ fontSize: 16 }} />}
+                                {isTime && <AccessTimeIcon sx={{ fontSize: 16 }} />}
+                              </Stack>
+                            }
+                            color="secondary"
+                            variant="outlined"
+                            size="small"
+                            sx={{ fontSize: '0.85rem' }}
+                          />
+                        );
+                      })}
                     </Box>
                   </Box>
+                </Stack>
+                <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={<SwapHorizIcon />}
+                    onClick={() => setShowDimensionFlags(true)}
+                  >
+                    Manage Dimension Flags
+                  </Button>
+                  <Stack direction="row" spacing={2} alignItems="center">
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <KeyIcon sx={{ fontSize: 16, color: theme.palette.warning.main }} />
+                      <Typography variant="caption">Index</Typography>
+                    </Stack>
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <AccessTimeIcon sx={{ fontSize: 16, color: theme.palette.info.main }} />
+                      <Typography variant="caption">Time</Typography>
+                    </Stack>
+                  </Stack>
                 </Stack>
               </Box>
 
@@ -369,7 +464,7 @@ function App() {
                     <TableHead>
                       <TableRow>
                         {metadata.columns.map((column) => (
-                          <TableCell key={column}>{column}</TableCell>
+                          <TableCell key={column}>{renderColumnHeader(column)}</TableCell>
                         ))}
                       </TableRow>
                     </TableHead>
@@ -420,7 +515,7 @@ function App() {
                   <TableHead>
                     <TableRow>
                       {metadata.columns.map((column) => (
-                        <TableCell key={column}>{column}</TableCell>
+                        <TableCell key={column}>{renderColumnHeader(column)}</TableCell>
                       ))}
                     </TableRow>
                   </TableHead>
@@ -469,6 +564,78 @@ function App() {
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setShowClassifications(false)}>Close</Button>
+          </DialogActions>
+        </Dialog>
+
+        <Dialog 
+          open={showDimensionFlags} 
+          onClose={() => setShowDimensionFlags(false)}
+          maxWidth="sm"
+          fullWidth
+        >
+          <DialogTitle>Manage Dimension Flags</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Select columns to be used as index and time dimensions. Any column can be used for these purposes, regardless of its classification.
+            </Typography>
+            <List>
+              {metadata?.columns.map((column) => {
+                const isMetric = metadata.column_classifications.metrics.includes(column);
+                return (
+                  <ListItem key={column}>
+                    <ListItemText 
+                      primary={
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <span>{column}</span>
+                          <Chip 
+                            label={isMetric ? "Metric" : "Dimension"} 
+                            size="small" 
+                            color={isMetric ? "secondary" : "primary"}
+                            variant="outlined"
+                          />
+                        </Stack>
+                      }
+                      secondary={metadata.column_types[column]}
+                    />
+                    <Stack direction="row" spacing={2}>
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={metadata.dimension_flags.index_dimension === column}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                handleDimensionFlagsChange(column, metadata.dimension_flags.time_dimension)
+                              }
+                            }}
+                          />
+                        }
+                        label="Index"
+                      />
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={metadata.dimension_flags.time_dimension === column}
+                            onChange={(e) => {
+                              handleDimensionFlagsChange(
+                                metadata.dimension_flags.index_dimension,
+                                e.target.checked ? column : null
+                              )
+                            }}
+                          />
+                        }
+                        label="Time"
+                      />
+                    </Stack>
+                  </ListItem>
+                );
+              })}
+            </List>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+              Note: Index dimension is required and cannot be unset. To change it, select a different column as index.
+            </Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setShowDimensionFlags(false)}>Close</Button>
           </DialogActions>
         </Dialog>
       </Container>

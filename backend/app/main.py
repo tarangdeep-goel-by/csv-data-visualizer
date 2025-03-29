@@ -3,8 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import pandas as pd
 import os
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import json
+from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -19,6 +20,10 @@ app.add_middleware(
 
 # Create data directory if it doesn't exist
 os.makedirs("data", exist_ok=True)
+
+class DimensionFlags(BaseModel):
+    index_dimension: str
+    time_dimension: Optional[str] = None
 
 def classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
     """Classify columns as dimensions (string) or metrics (numeric)."""
@@ -36,6 +41,10 @@ def classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
         "metrics": metrics
     }
 
+def get_default_index_dimension(dimensions: List[str]) -> str:
+    """Get the first dimension as the default index dimension."""
+    return dimensions[0] if dimensions else None
+
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)) -> Dict[str, Any]:
     # Read the CSV file
@@ -48,13 +57,20 @@ async def upload_file(file: UploadFile = File(...)) -> Dict[str, Any]:
     # Classify columns
     column_classifications = classify_columns(df)
     
+    # Set default index dimension
+    index_dimension = get_default_index_dimension(column_classifications["dimensions"])
+    
     # Generate metadata
     metadata = {
         "columns": df.columns.tolist(),
         "row_count": len(df),
         "column_types": df.dtypes.astype(str).to_dict(),
         "sample_data": df.head(5).to_dict(orient="records"),
-        "column_classifications": column_classifications
+        "column_classifications": column_classifications,
+        "dimension_flags": {
+            "index_dimension": index_dimension,
+            "time_dimension": None
+        }
     }
     
     # Save metadata
@@ -108,6 +124,41 @@ async def update_classifications(classifications: Dict[str, List[str]]) -> Dict[
         )
     
     metadata["column_classifications"] = classifications
+    
+    with open(metadata_path, "w") as f:
+        json.dump(metadata, f)
+    
+    return metadata
+
+@app.put("/metadata/dimension-flags")
+async def update_dimension_flags(flags: DimensionFlags) -> Dict[str, Any]:
+    metadata_path = os.path.join("data", "metadata.json")
+    
+    if not os.path.exists(metadata_path):
+        raise HTTPException(status_code=404, detail="No metadata found")
+    
+    with open(metadata_path, "r") as f:
+        metadata = json.load(f)
+    
+    # Validate that the columns exist in the dataset
+    all_columns = set(metadata["columns"])
+    
+    if flags.index_dimension not in all_columns:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid index dimension: column does not exist"
+        )
+    
+    if flags.time_dimension and flags.time_dimension not in all_columns:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid time dimension: column does not exist"
+        )
+    
+    metadata["dimension_flags"] = {
+        "index_dimension": flags.index_dimension,
+        "time_dimension": flags.time_dimension
+    }
     
     with open(metadata_path, "w") as f:
         json.dump(metadata, f)
