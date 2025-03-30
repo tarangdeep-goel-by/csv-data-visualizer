@@ -1,11 +1,8 @@
 import { useState, useEffect } from 'react'
 import { 
-  Container, 
-  Typography, 
   Box,
   useTheme
 } from '@mui/material'
-import TableChartIcon from '@mui/icons-material/TableChart'
 import axios from 'axios'
 import { Upload } from './components/Upload'
 import { Metadata } from './components/Metadata'
@@ -341,69 +338,50 @@ function App() {
   return (
     <Box sx={{ 
       minHeight: '100vh',
-      bgcolor: theme.palette.grey[100],
-      py: 4
+      bgcolor: 'background.default',
+      p: 4
     }}>
-      <Container maxWidth="lg">
-        <Typography 
-          variant="h4" 
-          component="h1" 
-          gutterBottom
-          sx={{
-            fontWeight: 600,
-            color: theme.palette.primary.main,
-            mb: 4,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 2
-          }}
-        >
-          <TableChartIcon sx={{ fontSize: 40 }} />
-          CSV Data Visualizer
-        </Typography>
+      <Upload
+        file={file}
+        loading={loading}
+        error={error}
+        onFileChange={handleFileChange}
+        onUpload={handleUpload}
+      />
 
-        <Upload
-          file={file}
-          loading={loading}
-          error={error}
-          onFileChange={handleFileChange}
-          onUpload={handleUpload}
-        />
+      {metadata && (
+        <>
+          <Metadata
+            metadata={metadata}
+            loading={loading}
+            onDownload={handleDownload}
+            onClassificationsChange={handleClassificationChange}
+            onDimensionFlagsChange={handleDimensionFlagsChange}
+            onApplyClassifications={handleApplyClassifications}
+            onApplyDimensionFlags={handleApplyDimensionFlags}
+            showClassifications={showClassifications}
+            setShowClassifications={setShowClassifications}
+            showDimensionFlags={showDimensionFlags}
+            setShowDimensionFlags={setShowDimensionFlags}
+            pendingMetadata={pendingMetadata}
+          />
 
-        {metadata && (
-          <>
-            <Metadata
-              metadata={metadata}
-              loading={loading}
-              onDownload={handleDownload}
-              onClassificationsChange={handleClassificationChange}
-              onDimensionFlagsChange={handleDimensionFlagsChange}
-              onApplyClassifications={handleApplyClassifications}
-              onApplyDimensionFlags={handleApplyDimensionFlags}
-              showClassifications={showClassifications}
-              setShowClassifications={setShowClassifications}
-              showDimensionFlags={showDimensionFlags}
-              setShowDimensionFlags={setShowDimensionFlags}
-              pendingMetadata={pendingMetadata}
-            />
-
-            <Data
-              metadata={metadata}
-              completeData={completeData}
-              loading={loading}
-              filterState={filterState}
-              onDownloadFilteredView={handleDownloadFilteredView}
-              onRemoveFromView={handleRemoveFromView}
-              onAddToView={handleAddToView}
-              onApplyFilters={handleApplyFilters}
-              showFilters={showFilters}
-              setShowFilters={setShowFilters}
-              tempFilterState={tempFilterState}
-              setTempFilterState={setTempFilterState}
-            />
-          </>
-        )}
-      </Container>
+          <Data
+            metadata={metadata}
+            completeData={completeData}
+            loading={loading}
+            filterState={filterState}
+            onDownloadFilteredView={handleDownloadFilteredView}
+            onRemoveFromView={handleRemoveFromView}
+            onAddToView={handleAddToView}
+            onApplyFilters={handleApplyFilters}
+            showFilters={showFilters}
+            setShowFilters={setShowFilters}
+            tempFilterState={tempFilterState}
+            setTempFilterState={setTempFilterState}
+          />
+        </>
+      )}
     </Box>
   )
 }

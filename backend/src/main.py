@@ -24,6 +24,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def round_numeric_values(df: pd.DataFrame, metrics: List[str]) -> pd.DataFrame:
+    """Round numeric values in metric columns to 2 decimal places."""
+    df_copy = df.copy()
+    for column in metrics:
+        if column in df_copy.columns and df_copy[column].dtype in ['float64', 'float32']:
+            df_copy[column] = df_copy[column].round(2)
+    return df_copy
+
 def validate_csv_file(file: UploadFile) -> None:
     # Check file type
     if not file.filename.lower().endswith('.csv'):
@@ -73,8 +81,9 @@ async def upload_file(file: UploadFile):
         # Get column types
         column_types = {col: str(df[col].dtype) for col in df.columns}
         
-        # Get sample data (first 5 rows)
-        sample_data = df.head().to_dict('records')
+        # Round numeric values in sample data
+        df_rounded = round_numeric_values(df, metrics)
+        sample_data = df_rounded.head().to_dict('records')
 
         # If no dimensions identified, use the first non-metric column as index
         index_dimension = None
@@ -90,6 +99,9 @@ async def upload_file(file: UploadFile):
                 # If no non-metric columns, use the first column as index
                 index_dimension = df.columns[0]
                 dimensions.append(index_dimension)
+        
+        # Save the original file with rounded values
+        df_rounded.to_csv("data/original_data.csv", index=False)
         
         return {
             "columns": list(df.columns),
@@ -112,4 +124,44 @@ async def upload_file(file: UploadFile):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ... rest of your endpoints ... 
+@app.post("/data/filter")
+async def filter_data(request: FilterRequest):
+    try:
+        df = pd.read_csv("data/original_data.csv")
+        
+        # Apply filters if any
+        if request.filters:
+            for column, value in request.filters.items():
+                if isinstance(value, list):
+                    df = df[df[column].isin(value)]
+                elif isinstance(value, dict):
+                    if 'min' in value:
+                        df = df[df[column] >= value['min']]
+                    if 'max' in value:
+                        df = df[df[column] <= value['max']]
+                else:
+                    df = df[df[column] == value]
+        
+        # Select requested columns
+        df = df[request.dimensions + request.metrics]
+        
+        # Group by dimensions if any
+        if request.dimensions:
+            aggs = {metric: 'sum' for metric in request.metrics}
+            df = df.groupby(request.dimensions, as_index=False).agg(aggs)
+        
+        # Round numeric values
+        df = round_numeric_values(df, request.metrics)
+        
+        return {
+            "data": df.to_dict(orient="records"),
+            "total_rows": len(df)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class FilterRequest(BaseModel):
+    dimensions: List[str]
+    metrics: List[str]
+    filters: Dict[str, Any] = {} 
