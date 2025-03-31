@@ -17,13 +17,16 @@ import {
   DialogActions,
   Box,
   Chip,
-  Tooltip
+  Tooltip,
+  Badge
 } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import FilterListIcon from '@mui/icons-material/FilterList'
 import KeyIcon from '@mui/icons-material/Key'
 import AccessTimeIcon from '@mui/icons-material/AccessTime'
-import { Metadata as MetadataType, CompleteData, FilterState } from './types'
+import { Metadata as MetadataType, CompleteData, FilterState, ColumnFilter, ValueFilter, RangeFilter } from './types'
+import { Filter } from './Filter'
+import { useState } from 'react'
 
 interface DataProps {
   metadata: MetadataType | null
@@ -38,6 +41,7 @@ interface DataProps {
   setShowFilters: (show: boolean) => void
   tempFilterState: FilterState
   setTempFilterState: (state: FilterState) => void
+  onFilterUpdate: (filters: ColumnFilter[]) => void
 }
 
 export const Data = ({
@@ -52,8 +56,11 @@ export const Data = ({
   showFilters,
   setShowFilters,
   tempFilterState,
-  setTempFilterState
+  setTempFilterState,
+  onFilterUpdate
 }: DataProps) => {
+  const [showFilterDialog, setShowFilterDialog] = useState(false);
+
   if (!metadata || !completeData) return null;
 
   const renderColumnHeader = (column: string) => {
@@ -109,6 +116,21 @@ export const Data = ({
           >
             Download View
           </Button>
+          <Badge badgeContent={filterState.filters.length} color="primary">
+            <Button
+              variant="outlined"
+              startIcon={<FilterListIcon />}
+              onClick={() => setShowFilterDialog(true)}
+              sx={{ 
+                py: 1.5,
+                px: 3,
+                borderRadius: 2,
+                textTransform: 'none'
+              }}
+            >
+              Filters
+            </Button>
+          </Badge>
           <Button
             variant="outlined"
             startIcon={<FilterListIcon />}
@@ -123,10 +145,35 @@ export const Data = ({
               textTransform: 'none'
             }}
           >
-            Manage Filters
+            Manage View
           </Button>
         </Stack>
       </Stack>
+
+      {/* Active Filters Display */}
+      {filterState.filters.length > 0 && (
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="subtitle2" gutterBottom>Active Filters:</Typography>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            {filterState.filters.map((filter, index) => (
+              <Chip
+                key={index}
+                label={`${filter.column}: ${
+                  filter.filter.type === 'value'
+                    ? (filter.filter as ValueFilter).values.join(', ')
+                    : `${(filter.filter as RangeFilter).min} - ${(filter.filter as RangeFilter).max}`
+                }`}
+                onDelete={() => {
+                  const newFilters = filterState.filters.filter((_, i) => i !== index);
+                  onFilterUpdate(newFilters);
+                }}
+                color="primary"
+                variant="outlined"
+              />
+            ))}
+          </Stack>
+        </Box>
+      )}
 
       <TableContainer 
         sx={{ 
@@ -180,6 +227,14 @@ export const Data = ({
         </Table>
       </TableContainer>
 
+      <Filter
+        open={showFilterDialog}
+        onClose={() => setShowFilterDialog(false)}
+        metadata={metadata}
+        filterState={filterState}
+        onFilterUpdate={onFilterUpdate}
+      />
+
       <Dialog 
         open={showFilters} 
         onClose={() => setShowFilters(false)}
@@ -216,12 +271,12 @@ export const Data = ({
                   size="small"
                   onClick={() => {
                     if (metadata) {
-                      setTempFilterState((prev: FilterState) => ({
-                        ...prev,
+                      setTempFilterState({
+                        ...tempFilterState,
                         metrics: metadata.column_classifications.metrics,
-                        dimensions: prev.dimensions,
-                        filters: prev.filters
-                      }));
+                        dimensions: tempFilterState.dimensions,
+                        filters: tempFilterState.filters
+                      });
                     }
                   }}
                 >

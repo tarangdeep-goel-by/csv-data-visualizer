@@ -1,4 +1,6 @@
 fastapi==0.115.12
 uvicorn==0.34.0
 pandas==2.2.3
-python-multipart==0.0.20 
+python-multipart==0.0.20
+pydantic==2.6.3
+python-dotenv==1.0.1 

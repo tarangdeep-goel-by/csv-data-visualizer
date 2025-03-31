@@ -7,7 +7,7 @@ import axios from 'axios'
 import { Upload } from './components/Upload'
 import { Metadata } from './components/Metadata'
 import { Data } from './components/Data'
-import { Metadata as MetadataType, CompleteData, FilterState } from './components/types'
+import { Metadata as MetadataType, CompleteData, FilterState, ColumnFilter } from './components/types'
 
 function App() {
   const theme = useTheme()
@@ -22,12 +22,12 @@ function App() {
   const [filterState, setFilterState] = useState<FilterState>({
     dimensions: [],
     metrics: [],
-    filters: {}
+    filters: []
   })
   const [tempFilterState, setTempFilterState] = useState<FilterState>({
     dimensions: [],
     metrics: [],
-    filters: {}
+    filters: []
   })
   const [pendingMetadata, setPendingMetadata] = useState<MetadataType | null>(null)
 
@@ -78,7 +78,7 @@ function App() {
       const initialFilterState = {
         dimensions: [response.data.dimension_flags.index_dimension],
         metrics: response.data.column_classifications.metrics,
-        filters: {}
+        filters: []
       };
       setFilterState(initialFilterState);
       setTempFilterState(initialFilterState);
@@ -166,7 +166,7 @@ function App() {
     setTempFilterState({
       dimensions: [pendingMetadata.dimension_flags.index_dimension],
       metrics: newClassifications.metrics,
-      filters: {}
+      filters: []
     });
   };
 
@@ -186,7 +186,7 @@ function App() {
       const newFilterState = {
         dimensions: [response.data.dimension_flags.index_dimension],
         metrics: response.data.column_classifications.metrics,
-        filters: {}
+        filters: []
       };
       
       // Apply filter changes
@@ -220,7 +220,7 @@ function App() {
     setTempFilterState({
       dimensions: [indexDimension],
       metrics: pendingMetadata.column_classifications.metrics,
-      filters: {}
+      filters: []
     });
   };
 
@@ -240,7 +240,7 @@ function App() {
       const newFilterState = {
         dimensions: [response.data.dimension_flags.index_dimension],
         metrics: response.data.column_classifications.metrics,
-        filters: {}
+        filters: []
       };
       
       // Apply filter changes
@@ -258,6 +258,15 @@ function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFilterUpdate = async (filters: ColumnFilter[]) => {
+    const newFilterState = {
+      ...filterState,
+      filters
+    };
+    setFilterState(newFilterState);
+    await fetchCompleteData(newFilterState);
   };
 
   const handleRemoveFromView = async (column: string) => {
@@ -281,41 +290,27 @@ function App() {
     await fetchCompleteData(newFilterState);
   };
 
-  const handleApplyFilters = async () => {
-    setFilterState(tempFilterState);
-    try {
-      setLoading(true);
-      const response = await axios.post('http://localhost:8000/data/filter', tempFilterState);
-      setCompleteData(response.data);
-      setError(null);
-      setShowFilters(false);
-    } catch (err) {
-      console.error('Error fetching data:', err);
-      if (axios.isAxiosError(err)) {
-        setError(`Error fetching data: ${err.response?.data?.detail || err.message}`);
-      } else {
-        setError('Error fetching data. Please try again.');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleAddToView = (column: string) => {
     if (!metadata) return;
     
     const isMetric = metadata.column_classifications.metrics.includes(column);
-    // Only update the temporary filter state
-    setTempFilterState(prev => ({
-      ...prev,
-      dimensions: isMetric ? prev.dimensions : [...prev.dimensions, column],
-      metrics: isMetric ? [...prev.metrics, column] : prev.metrics
-    }));
+    const newTempFilterState = {
+      ...tempFilterState,
+      [isMetric ? 'metrics' : 'dimensions']: [...tempFilterState[isMetric ? 'metrics' : 'dimensions'], column]
+    };
+
+    setTempFilterState(newTempFilterState);
+  };
+
+  const handleApplyFilters = async () => {
+    setFilterState(tempFilterState);
+    await fetchCompleteData(tempFilterState);
+    setShowFilters(false);
   };
 
   const handleDownloadFilteredView = async () => {
     try {
-      const response = await axios.post('http://localhost:8000/data/download', filterState, {
+      const response = await axios.post('http://localhost:8000/download/filtered', filterState, {
         responseType: 'blob'
       });
       
@@ -330,7 +325,7 @@ function App() {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
     } catch (err) {
-      setError('Error downloading filtered data. Please try again.');
+      setError('Error downloading filtered view. Please try again.');
       console.error(err);
     }
   };
@@ -347,6 +342,7 @@ function App() {
         error={error}
         onFileChange={handleFileChange}
         onUpload={handleUpload}
+        onDownload={handleDownload}
       />
 
       {metadata && (
@@ -379,6 +375,7 @@ function App() {
             setShowFilters={setShowFilters}
             tempFilterState={tempFilterState}
             setTempFilterState={setTempFilterState}
+            onFilterUpdate={handleFilterUpdate}
           />
         </>
       )}

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 import pandas as pd
 import os
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 import json
 from pydantic import BaseModel
 from io import StringIO
@@ -27,10 +27,23 @@ class DimensionFlags(BaseModel):
     index_dimension: str
     time_dimension: Optional[str] = None
 
+class ValueFilter(BaseModel):
+    type: str = "value"
+    values: List[str]
+
+class RangeFilter(BaseModel):
+    type: str = "range"
+    min: float
+    max: float
+
+class ColumnFilter(BaseModel):
+    column: str
+    filter: Union[ValueFilter, RangeFilter]
+
 class FilterRequest(BaseModel):
     dimensions: List[str]
     metrics: List[str]
-    filters: Dict[str, Any]
+    filters: List[ColumnFilter]
 
 def classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
     """Classify columns as dimensions (string) or metrics (numeric)."""
@@ -61,21 +74,19 @@ def aggregate_data(df: pd.DataFrame, dimensions: List[str], metrics: List[str]) 
     agg_dict = {metric: 'sum' for metric in metrics}
     return df.groupby(dimensions).agg(agg_dict).reset_index()
 
-def apply_filters(df: pd.DataFrame, filters: Dict[str, Any]) -> pd.DataFrame:
+def apply_filters(df: pd.DataFrame, filters: List[ColumnFilter]) -> pd.DataFrame:
     """Apply filters to the dataframe."""
     if not filters:
         return df
     
-    for column, value in filters.items():
-        if isinstance(value, list):
-            df = df[df[column].isin(value)]
-        elif isinstance(value, dict):
-            if 'min' in value:
-                df = df[df[column] >= value['min']]
-            if 'max' in value:
-                df = df[df[column] <= value['max']]
-        else:
-            df = df[df[column] == value]
+    for column_filter in filters:
+        column = column_filter.column
+        filter_data = column_filter.filter
+        
+        if filter_data.type == "value":
+            df = df[df[column].isin(filter_data.values)]
+        elif filter_data.type == "range":
+            df = df[(df[column] >= filter_data.min) & (df[column] <= filter_data.max)]
     
     return df
 
@@ -255,41 +266,56 @@ async def filter_data(request: FilterRequest) -> Dict[str, Any]:
         "total_rows": len(df)
     }
 
-@app.post("/data/download")
+@app.post("/download/filtered")
 async def download_filtered_data(filter_request: FilterRequest):
-    try:
-        # Get the filtered data using the same logic as /data/filter
-        file_path = os.path.join("data", "original_data.csv")
-        
-        if not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="No data file found")
-            
-        df = pd.read_csv(file_path)
-        
-        # Apply dimension and metric filtering
-        selected_columns = filter_request.dimensions + filter_request.metrics
-        df_filtered = df[selected_columns]
-        
-        # Group by dimensions if any
-        if filter_request.dimensions:
-            # Calculate aggregates for metrics
-            aggs = {metric: 'sum' for metric in filter_request.metrics}
-            df_filtered = df_filtered.groupby(filter_request.dimensions, as_index=False).agg(aggs)
-        
-        # Convert filtered DataFrame to CSV
-        output = StringIO()
-        df_filtered.to_csv(output, index=False)
-        
-        # Create response with CSV file
-        response = StreamingResponse(
-            iter([output.getvalue()]),
-            media_type="text/csv",
-            headers={
-                'Content-Disposition': 'attachment; filename=filtered_data.csv'
-            }
+    file_path = os.path.join("data", "original_data.csv")
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="No data file found")
+    
+    df = pd.read_csv(file_path)
+    
+    # Apply filters
+    if filter_request.filters:
+        df = apply_filters(df, filter_request.filters)
+    
+    # Ensure all requested columns exist
+    all_columns = set(df.columns)
+    requested_columns = set(filter_request.dimensions + filter_request.metrics)
+    if not requested_columns.issubset(all_columns):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid columns requested"
         )
-        
-        return response
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) 
+    
+    # Select only requested columns
+    df = df[filter_request.dimensions + filter_request.metrics]
+    
+    # Create CSV string
+    csv_string = df.to_csv(index=False)
+    
+    return StreamingResponse(
+        StringIO(csv_string),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=filtered_data.csv"}
+    )
+
+@app.get("/data/unique-values/{column}")
+async def get_unique_values(column: str) -> Dict[str, List[str]]:
+    """Get unique values for a specific column."""
+    file_path = os.path.join("data", "original_data.csv")
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="No data file found")
+    
+    df = pd.read_csv(file_path)
+    
+    if column not in df.columns:
+        raise HTTPException(status_code=400, detail="Column not found")
+    
+    unique_values = df[column].unique().tolist()
+    # Convert all values to strings for consistency
+    unique_values = [str(val) for val in unique_values if pd.notna(val)]
+    unique_values.sort()
+    
+    return {"values": unique_values} 
