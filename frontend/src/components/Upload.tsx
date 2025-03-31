@@ -22,9 +22,10 @@ interface UploadProps {
   onFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void
   onUpload: () => void
   onDownload: () => void
+  hasData: boolean
 }
 
-export const Upload = ({ file, loading, error, onFileChange, onUpload, onDownload }: UploadProps) => {
+export const Upload = ({ file, loading, error, onFileChange, onUpload, onDownload, hasData }: UploadProps) => {
   return (
     <Paper 
       elevation={0}
@@ -40,14 +41,16 @@ export const Upload = ({ file, loading, error, onFileChange, onUpload, onDownloa
           Upload CSV
         </Typography>
         <Stack direction="row" spacing={1}>
-          <Button
-            variant="outlined"
-            onClick={onDownload}
-            disabled={loading}
-            startIcon={<UploadFileIcon />}
-          >
-            Download
-          </Button>
+          {hasData && (
+            <Button
+              variant="outlined"
+              onClick={onDownload}
+              disabled={loading}
+              startIcon={<UploadFileIcon />}
+            >
+              Download
+            </Button>
+          )}
           <Tooltip title="More options">
             <IconButton size="small">
               <MoreHorizIcon />

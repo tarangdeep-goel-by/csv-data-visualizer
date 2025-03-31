@@ -55,7 +55,10 @@ export const Filter: React.FC<FilterProps> = ({
       try {
         setLoading(true);
         setError(null);
-        const response = await axios.get(`http://localhost:8000/data/unique-values/${selectedColumn}`);
+        const response = await axios.post(
+          `http://localhost:8000/data/unique-values/${selectedColumn}`,
+          filterState
+        );
         setUniqueValues(response.data.values);
       } catch (err) {
         console.error('Error fetching unique values:', err);
@@ -66,7 +69,7 @@ export const Filter: React.FC<FilterProps> = ({
     };
 
     fetchUniqueValues();
-  }, [selectedColumn]);
+  }, [selectedColumn, filterState.filters]);
 
   const handleColumnChange = (column: string) => {
     setSelectedColumn(column);

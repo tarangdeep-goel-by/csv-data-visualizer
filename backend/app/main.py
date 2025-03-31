@@ -90,6 +90,14 @@ def apply_filters(df: pd.DataFrame, filters: List[ColumnFilter]) -> pd.DataFrame
     
     return df
 
+def round_numeric_values(df: pd.DataFrame, metrics: List[str]) -> pd.DataFrame:
+    """Round numeric values in metric columns to 2 decimal places."""
+    df_copy = df.copy()
+    for column in df_copy.columns:
+        if pd.api.types.is_numeric_dtype(df_copy[column]):
+            df_copy[column] = df_copy[column].round(2)
+    return df_copy
+
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)) -> Dict[str, Any]:
     # Read the CSV file
@@ -215,7 +223,7 @@ async def download_file():
     file_path = os.path.join("data", "original_data.csv")
     
     if not os.path.exists(file_path):
-        return {"error": "No data file found"}
+        raise HTTPException(status_code=404, detail="No data file found")
     
     return FileResponse(
         file_path,
@@ -257,6 +265,8 @@ async def filter_data(request: FilterRequest) -> Dict[str, Any]:
     if request.metrics:
         agg_dict = {metric: 'sum' for metric in request.metrics}
         df = df.groupby(request.dimensions, as_index=False).agg(agg_dict)
+        # Round numeric values after aggregation
+        df = round_numeric_values(df, request.metrics)
     else:
         # If no metrics, just get unique combinations of dimensions
         df = df[request.dimensions].drop_duplicates()
@@ -291,6 +301,9 @@ async def download_filtered_data(filter_request: FilterRequest):
     # Select only requested columns
     df = df[filter_request.dimensions + filter_request.metrics]
     
+    # Round numeric values before creating CSV
+    df = round_numeric_values(df, filter_request.metrics)
+    
     # Create CSV string
     csv_string = df.to_csv(index=False)
     
@@ -300,9 +313,9 @@ async def download_filtered_data(filter_request: FilterRequest):
         headers={"Content-Disposition": "attachment; filename=filtered_data.csv"}
     )
 
-@app.get("/data/unique-values/{column}")
-async def get_unique_values(column: str) -> Dict[str, List[str]]:
-    """Get unique values for a specific column."""
+@app.post("/data/unique-values/{column}")
+async def get_unique_values(column: str, filter_request: FilterRequest) -> Dict[str, List[str]]:
+    """Get unique values for a specific column based on current filters."""
     file_path = os.path.join("data", "original_data.csv")
     
     if not os.path.exists(file_path):
@@ -313,6 +326,15 @@ async def get_unique_values(column: str) -> Dict[str, List[str]]:
     if column not in df.columns:
         raise HTTPException(status_code=400, detail="Column not found")
     
+    # Apply existing filters first
+    if filter_request.filters:
+        df = apply_filters(df, filter_request.filters)
+    
+    # Round numeric values if the column is numeric
+    if pd.api.types.is_numeric_dtype(df[column]):
+        df[column] = df[column].round(2)
+    
+    # Get unique values for the requested column
     unique_values = df[column].unique().tolist()
     # Convert all values to strings for consistency
     unique_values = [str(val) for val in unique_values if pd.notna(val)]

@@ -343,6 +343,7 @@ function App() {
         onFileChange={handleFileChange}
         onUpload={handleUpload}
         onDownload={handleDownload}
+        hasData={!!completeData}
       />
 
       {metadata && (
