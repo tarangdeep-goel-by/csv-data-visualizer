@@ -116,21 +116,6 @@ export const Data = ({
           >
             Download View
           </Button>
-          <Badge badgeContent={filterState.filters.length} color="primary">
-            <Button
-              variant="outlined"
-              startIcon={<FilterListIcon />}
-              onClick={() => setShowFilterDialog(true)}
-              sx={{ 
-                py: 1.5,
-                px: 3,
-                borderRadius: 2,
-                textTransform: 'none'
-              }}
-            >
-              Filters
-            </Button>
-          </Badge>
           <Button
             variant="outlined"
             startIcon={<FilterListIcon />}
@@ -150,30 +135,14 @@ export const Data = ({
         </Stack>
       </Stack>
 
-      {/* Active Filters Display */}
-      {filterState.filters.length > 0 && (
-        <Box sx={{ mb: 2 }}>
-          <Typography variant="subtitle2" gutterBottom>Active Filters:</Typography>
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            {filterState.filters.map((filter, index) => (
-              <Chip
-                key={index}
-                label={`${filter.column}: ${
-                  filter.filter.type === 'value'
-                    ? (filter.filter as ValueFilter).values.join(', ')
-                    : `${(filter.filter as RangeFilter).min} - ${(filter.filter as RangeFilter).max}`
-                }`}
-                onDelete={() => {
-                  const newFilters = filterState.filters.filter((_, i) => i !== index);
-                  onFilterUpdate(newFilters);
-                }}
-                color="primary"
-                variant="outlined"
-              />
-            ))}
-          </Stack>
-        </Box>
-      )}
+      <Filter
+        open={showFilterDialog}
+        onClose={() => setShowFilterDialog(false)}
+        onOpen={() => setShowFilterDialog(true)}
+        metadata={metadata}
+        filterState={filterState}
+        onFilterUpdate={onFilterUpdate}
+      />
 
       <TableContainer 
         sx={{ 
@@ -226,14 +195,6 @@ export const Data = ({
           </TableBody>
         </Table>
       </TableContainer>
-
-      <Filter
-        open={showFilterDialog}
-        onClose={() => setShowFilterDialog(false)}
-        metadata={metadata}
-        filterState={filterState}
-        onFilterUpdate={onFilterUpdate}
-      />
 
       <Dialog 
         open={showFilters} 

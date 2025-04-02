@@ -15,9 +15,9 @@ import {
   IconButton,
   Typography,
   CircularProgress,
+  Stack,
 } from '@mui/material';
-import { Delete as DeleteIcon } from '@mui/icons-material';
-import { Filter as FilterIcon } from '@mui/icons-material';
+import { Delete as DeleteIcon, Filter as FilterIcon, Add as AddIcon } from '@mui/icons-material';
 import { FilterState, ColumnFilter, ValueFilter, RangeFilter, Metadata } from './types';
 import axios from 'axios';
 
@@ -27,6 +27,7 @@ interface FilterProps {
   metadata: Metadata | null;
   filterState: FilterState;
   onFilterUpdate: (newFilters: ColumnFilter[]) => void;
+  onOpen: () => void;
 }
 
 export const Filter: React.FC<FilterProps> = ({
@@ -35,6 +36,7 @@ export const Filter: React.FC<FilterProps> = ({
   metadata,
   filterState,
   onFilterUpdate,
+  onOpen,
 }) => {
   const [selectedColumn, setSelectedColumn] = useState<string>('');
   const [filterType, setFilterType] = useState<'value' | 'range'>('value');
@@ -44,6 +46,7 @@ export const Filter: React.FC<FilterProps> = ({
   const [uniqueValues, setUniqueValues] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editingFilterIndex, setEditingFilterIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (!selectedColumn) {
@@ -55,9 +58,18 @@ export const Filter: React.FC<FilterProps> = ({
       try {
         setLoading(true);
         setError(null);
+        
+        // If we're editing a filter, exclude it from the filter state to get all possible values
+        const filterStateForFetch = editingFilterIndex !== null
+          ? {
+              ...filterState,
+              filters: filterState.filters.filter((_, index) => index !== editingFilterIndex)
+            }
+          : filterState;
+
         const response = await axios.post(
           `http://localhost:8000/data/unique-values/${selectedColumn}`,
-          filterState
+          filterStateForFetch
         );
         setUniqueValues(response.data.values);
       } catch (err) {
@@ -69,7 +81,7 @@ export const Filter: React.FC<FilterProps> = ({
     };
 
     fetchUniqueValues();
-  }, [selectedColumn, filterState.filters]);
+  }, [selectedColumn, filterState.filters, editingFilterIndex]);
 
   const handleColumnChange = (column: string) => {
     setSelectedColumn(column);
@@ -99,9 +111,41 @@ export const Filter: React.FC<FilterProps> = ({
     resetForm();
   };
 
+  const handleUpdateFilter = () => {
+    if (!selectedColumn || editingFilterIndex === null) return;
+
+    const updatedFilter: ColumnFilter = {
+      column: selectedColumn,
+      filter: filterType === 'value'
+        ? { type: 'value', values: selectedValues }
+        : { type: 'range', min: parseFloat(rangeMin), max: parseFloat(rangeMax) },
+    };
+
+    const updatedFilters = filterState.filters.map((filter, index) => 
+      index === editingFilterIndex ? updatedFilter : filter
+    );
+    onFilterUpdate(updatedFilters);
+    resetForm();
+  };
+
   const handleRemoveFilter = (index: number) => {
     const updatedFilters = filterState.filters.filter((_, i) => i !== index);
     onFilterUpdate(updatedFilters);
+    if (editingFilterIndex === index) {
+      resetForm();
+    }
+  };
+
+  const handleEditFilter = (filter: ColumnFilter, index: number) => {
+    setSelectedColumn(filter.column);
+    setFilterType(filter.filter.type);
+    if (filter.filter.type === 'value') {
+      setSelectedValues((filter.filter as ValueFilter).values);
+    } else {
+      setRangeMin((filter.filter as RangeFilter).min.toString());
+      setRangeMax((filter.filter as RangeFilter).max.toString());
+    }
+    setEditingFilterIndex(index);
   };
 
   const resetForm = () => {
@@ -112,133 +156,155 @@ export const Filter: React.FC<FilterProps> = ({
     setRangeMax('');
     setUniqueValues([]);
     setError(null);
+    setEditingFilterIndex(null);
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>
-        <Box display="flex" alignItems="center" gap={1}>
-          <FilterIcon />
-          <Typography variant="h6">Filters</Typography>
+    <>
+      {/* Inline Filter Display */}
+      <Box sx={{ mb: 2 }}>
+        <Stack direction="row" alignItems="center" spacing={1} mb={1}>
+          <Typography variant="subtitle2">Filters</Typography>
+          <Button
+            size="small"
+            startIcon={<AddIcon />}
+            onClick={() => {
+              resetForm();
+              onOpen();
+            }}
+          >
+            Add Filter
+          </Button>
+        </Stack>
+        <Box display="flex" flexWrap="wrap" gap={1}>
+          {filterState.filters.map((filter, index) => (
+            <Chip
+              key={index}
+              label={`${filter.column}: ${
+                filter.filter.type === 'value'
+                  ? (filter.filter as ValueFilter).values.join(', ')
+                  : `${(filter.filter as RangeFilter).min} - ${(filter.filter as RangeFilter).max}`
+              }`}
+              onClick={() => {
+                handleEditFilter(filter, index);
+                onOpen();
+              }}
+              onDelete={() => handleRemoveFilter(index)}
+              deleteIcon={<DeleteIcon />}
+              color="primary"
+              variant="outlined"
+            />
+          ))}
         </Box>
-      </DialogTitle>
-      <DialogContent>
-        <Box display="flex" flexDirection="column" gap={2} mt={2}>
-          {/* Active Filters */}
-          <Box>
-            <Typography variant="subtitle2" gutterBottom>Active Filters</Typography>
-            <Box display="flex" flexWrap="wrap" gap={1}>
-              {filterState.filters.map((filter, index) => (
-                <Chip
-                  key={index}
-                  label={`${filter.column}: ${
-                    filter.filter.type === 'value'
-                      ? (filter.filter as ValueFilter).values.join(', ')
-                      : `${(filter.filter as RangeFilter).min} - ${(filter.filter as RangeFilter).max}`
-                  }`}
-                  onDelete={() => handleRemoveFilter(index)}
-                  deleteIcon={<DeleteIcon />}
-                />
-              ))}
-            </Box>
-          </Box>
+      </Box>
 
-          {/* Add New Filter */}
-          <Box>
-            <Typography variant="subtitle2" gutterBottom>Add New Filter</Typography>
-            <Box display="flex" flexDirection="column" gap={2}>
+      {/* Filter Dialog */}
+      <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box display="flex" alignItems="center" gap={1}>
+            <FilterIcon />
+            <Typography variant="h6">
+              {editingFilterIndex !== null ? 'Edit Filter' : 'Add New Filter'}
+            </Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box display="flex" flexDirection="column" gap={2} mt={2}>
+            <FormControl fullWidth>
+              <InputLabel>Column</InputLabel>
+              <Select
+                value={selectedColumn}
+                onChange={(e) => handleColumnChange(e.target.value as string)}
+                label="Column"
+                disabled={editingFilterIndex !== null}
+              >
+                {metadata?.columns.map((column) => (
+                  <MenuItem key={column} value={column}>
+                    {column}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            {selectedColumn && (
               <FormControl fullWidth>
-                <InputLabel>Column</InputLabel>
+                <InputLabel>Filter Type</InputLabel>
                 <Select
-                  value={selectedColumn}
-                  onChange={(e) => handleColumnChange(e.target.value as string)}
-                  label="Column"
+                  value={filterType}
+                  onChange={(e) => setFilterType(e.target.value as 'value' | 'range')}
+                  label="Filter Type"
+                  disabled={metadata?.column_classifications.metrics.includes(selectedColumn)}
                 >
-                  {metadata?.columns.map((column) => (
-                    <MenuItem key={column} value={column}>
-                      {column}
-                    </MenuItem>
-                  ))}
+                  <MenuItem value="value">Value Filter</MenuItem>
+                  <MenuItem value="range">Range Filter</MenuItem>
                 </Select>
               </FormControl>
+            )}
 
-              {selectedColumn && (
-                <FormControl fullWidth>
-                  <InputLabel>Filter Type</InputLabel>
-                  <Select
-                    value={filterType}
-                    onChange={(e) => setFilterType(e.target.value as 'value' | 'range')}
-                    label="Filter Type"
-                    disabled={metadata?.column_classifications.metrics.includes(selectedColumn)}
-                  >
-                    <MenuItem value="value">Value Filter</MenuItem>
-                    <MenuItem value="range">Range Filter</MenuItem>
-                  </Select>
-                </FormControl>
-              )}
-
-              {selectedColumn && filterType === 'value' && (
-                <FormControl fullWidth>
-                  <InputLabel>Values</InputLabel>
-                  <Select
-                    multiple
-                    value={selectedValues}
-                    onChange={(e) => setSelectedValues(e.target.value as string[])}
-                    label="Values"
-                    disabled={loading}
-                  >
-                    {loading ? (
-                      <MenuItem disabled>
-                        <CircularProgress size={20} />
-                        Loading values...
+            {selectedColumn && filterType === 'value' && (
+              <FormControl fullWidth>
+                <InputLabel>Values</InputLabel>
+                <Select
+                  multiple
+                  value={selectedValues}
+                  onChange={(e) => setSelectedValues(e.target.value as string[])}
+                  label="Values"
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <MenuItem disabled>
+                      <CircularProgress size={20} />
+                      Loading values...
+                    </MenuItem>
+                  ) : error ? (
+                    <MenuItem disabled>
+                      Error loading values
+                    </MenuItem>
+                  ) : (
+                    uniqueValues.map((value) => (
+                      <MenuItem key={value} value={value}>
+                        {value}
                       </MenuItem>
-                    ) : error ? (
-                      <MenuItem disabled>
-                        Error loading values
-                      </MenuItem>
-                    ) : (
-                      uniqueValues.map((value) => (
-                        <MenuItem key={value} value={value}>
-                          {value}
-                        </MenuItem>
-                      ))
-                    )}
-                  </Select>
-                </FormControl>
-              )}
+                    ))
+                  )}
+                </Select>
+              </FormControl>
+            )}
 
-              {selectedColumn && filterType === 'range' && (
-                <Box display="flex" gap={2}>
-                  <TextField
-                    label="Min"
-                    type="number"
-                    value={rangeMin}
-                    onChange={(e) => setRangeMin(e.target.value)}
-                    fullWidth
-                  />
-                  <TextField
-                    label="Max"
-                    type="number"
-                    value={rangeMax}
-                    onChange={(e) => setRangeMax(e.target.value)}
-                    fullWidth
-                  />
-                </Box>
-              )}
-            </Box>
+            {selectedColumn && filterType === 'range' && (
+              <Box display="flex" gap={2}>
+                <TextField
+                  label="Min"
+                  type="number"
+                  value={rangeMin}
+                  onChange={(e) => setRangeMin(e.target.value)}
+                  fullWidth
+                />
+                <TextField
+                  label="Max"
+                  type="number"
+                  value={rangeMax}
+                  onChange={(e) => setRangeMax(e.target.value)}
+                  fullWidth
+                />
+              </Box>
+            )}
           </Box>
-        </Box>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Close</Button>
-        <Button
-          variant="contained"
-          onClick={handleAddFilter}
-          disabled={!selectedColumn || (filterType === 'value' && selectedValues.length === 0) || (filterType === 'range' && (!rangeMin || !rangeMax))}
-        >
-          Add Filter
-        </Button>
-      </DialogActions>
-    </Dialog>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={onClose}>Close</Button>
+          {editingFilterIndex !== null && (
+            <Button onClick={resetForm}>Cancel Edit</Button>
+          )}
+          <Button
+            variant="contained"
+            onClick={editingFilterIndex !== null ? handleUpdateFilter : handleAddFilter}
+            disabled={!selectedColumn || (filterType === 'value' && selectedValues.length === 0) || (filterType === 'range' && (!rangeMin || !rangeMax))}
+          >
+            {editingFilterIndex !== null ? 'Update Filter' : 'Add Filter'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
   );
 }; 
