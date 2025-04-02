@@ -8,6 +8,7 @@ import { Upload } from './components/Upload'
 import { Metadata } from './components/Metadata'
 import { Data } from './components/Data'
 import { Metadata as MetadataType, CompleteData, FilterState, ColumnFilter } from './components/types'
+import { Visualization } from './components/Visualization'
 
 function App() {
   const theme = useTheme()
@@ -22,12 +23,14 @@ function App() {
   const [filterState, setFilterState] = useState<FilterState>({
     dimensions: [],
     metrics: [],
-    filters: []
+    filters: [],
+    visualization_metrics: []
   })
   const [tempFilterState, setTempFilterState] = useState<FilterState>({
     dimensions: [],
     metrics: [],
-    filters: []
+    filters: [],
+    visualization_metrics: []
   })
   const [pendingMetadata, setPendingMetadata] = useState<MetadataType | null>(null)
 
@@ -78,7 +81,8 @@ function App() {
       const initialFilterState = {
         dimensions: [response.data.dimension_flags.index_dimension],
         metrics: response.data.column_classifications.metrics,
-        filters: []
+        filters: [],
+        visualization_metrics: []
       };
       setFilterState(initialFilterState);
       setTempFilterState(initialFilterState);
@@ -166,7 +170,8 @@ function App() {
     setTempFilterState({
       dimensions: [pendingMetadata.dimension_flags.index_dimension],
       metrics: newClassifications.metrics,
-      filters: []
+      filters: [],
+      visualization_metrics: []
     });
   };
 
@@ -186,7 +191,8 @@ function App() {
       const newFilterState = {
         dimensions: [response.data.dimension_flags.index_dimension],
         metrics: response.data.column_classifications.metrics,
-        filters: []
+        filters: [],
+        visualization_metrics: []
       };
       
       // Apply filter changes
@@ -220,7 +226,8 @@ function App() {
     setTempFilterState({
       dimensions: [indexDimension],
       metrics: pendingMetadata.column_classifications.metrics,
-      filters: []
+      filters: [],
+      visualization_metrics: []
     });
   };
 
@@ -240,7 +247,8 @@ function App() {
       const newFilterState = {
         dimensions: [response.data.dimension_flags.index_dimension],
         metrics: response.data.column_classifications.metrics,
-        filters: []
+        filters: [],
+        visualization_metrics: []
       };
       
       // Apply filter changes
@@ -279,7 +287,9 @@ function App() {
     const newFilterState = {
       ...filterState,
       dimensions: filterState.dimensions.filter(d => d !== column),
-      metrics: filterState.metrics.filter(m => m !== column)
+      metrics: filterState.metrics.filter(m => m !== column),
+      // Also remove from visualization metrics if it's there
+      visualization_metrics: filterState.visualization_metrics.filter(m => m !== column)
     };
 
     // Update both states
@@ -330,6 +340,15 @@ function App() {
     }
   };
 
+  const handleVisualizationMetricsChange = async (metrics: string[]) => {
+    const newFilterState = {
+      ...filterState,
+      visualization_metrics: metrics
+    };
+    setFilterState(newFilterState);
+    await fetchCompleteData(newFilterState);
+  };
+
   return (
     <Box sx={{ 
       minHeight: '100vh',
@@ -361,6 +380,14 @@ function App() {
             showDimensionFlags={showDimensionFlags}
             setShowDimensionFlags={setShowDimensionFlags}
             pendingMetadata={pendingMetadata}
+          />
+
+          <Visualization
+            metadata={metadata}
+            completeData={completeData}
+            loading={loading}
+            filterState={filterState}
+            onVisualizationMetricsChange={handleVisualizationMetricsChange}
           />
 
           <Data

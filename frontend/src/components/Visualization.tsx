@@ -63,6 +63,9 @@ export const Visualization: React.FC<VisualizationProps> = ({
     '#00C49F'
   ];
 
+  // Only show metrics that are currently in the view
+  const availableMetrics = filterState.metrics;
+
   return (
     <Paper 
       elevation={2}
@@ -82,12 +85,12 @@ export const Visualization: React.FC<VisualizationProps> = ({
           <InputLabel>Select Metrics</InputLabel>
           <Select
             multiple
-            value={filterState.visualization_metrics}
+            value={filterState.visualization_metrics.filter(m => availableMetrics.includes(m))} // Only show selected metrics that are still available
             onChange={(e) => onVisualizationMetricsChange(e.target.value as string[])}
             label="Select Metrics"
             disabled={loading}
           >
-            {metadata.column_classifications.metrics.map((metric) => (
+            {availableMetrics.map((metric) => (
               <MenuItem key={metric} value={metric}>
                 {metric}
               </MenuItem>
@@ -99,7 +102,7 @@ export const Visualization: React.FC<VisualizationProps> = ({
       <Box sx={{ mb: 2 }}>
         <Typography variant="subtitle2" gutterBottom>Selected Metrics:</Typography>
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          {metadata.column_classifications.metrics.map((metric) => (
+          {availableMetrics.map((metric) => (
             <Chip
               key={metric}
               label={metric}
@@ -112,7 +115,7 @@ export const Visualization: React.FC<VisualizationProps> = ({
       </Box>
 
       <Box sx={{ height: 400, width: '100%' }}>
-        {completeData.visualization_data.length > 0 ? (
+        {completeData.visualization_data.length > 0 && filterState.visualization_metrics.some(m => availableMetrics.includes(m)) ? (
           <ResponsiveContainer>
             <LineChart
               data={completeData.visualization_data}
@@ -163,16 +166,18 @@ export const Visualization: React.FC<VisualizationProps> = ({
                 }}
               />
               <Legend />
-              {filterState.visualization_metrics.map((metric, index) => (
-                <Line
-                  key={metric}
-                  type="monotone"
-                  dataKey={metric}
-                  stroke={colors[index % colors.length]}
-                  activeDot={{ r: 8 }}
-                  dot={false}
-                />
-              ))}
+              {filterState.visualization_metrics
+                .filter(metric => availableMetrics.includes(metric)) // Only show lines for metrics that are still available
+                .map((metric, index) => (
+                  <Line
+                    key={metric}
+                    type="monotone"
+                    dataKey={metric}
+                    stroke={colors[index % colors.length]}
+                    activeDot={{ r: 8 }}
+                    dot={false}
+                  />
+                ))}
             </LineChart>
           </ResponsiveContainer>
         ) : (
