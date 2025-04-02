@@ -44,6 +44,7 @@ class FilterRequest(BaseModel):
     dimensions: List[str]
     metrics: List[str]
     filters: List[ColumnFilter]
+    visualization_metrics: Optional[List[str]] = None
 
 def classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
     """Classify columns as dimensions (string) or metrics (numeric)."""
@@ -245,7 +246,8 @@ async def filter_data(request: FilterRequest) -> Dict[str, Any]:
     if not request.dimensions:
         return {
             "data": [],
-            "total_rows": 0
+            "total_rows": 0,
+            "visualization_data": []
         }
     
     # Apply filters first if any
@@ -271,9 +273,37 @@ async def filter_data(request: FilterRequest) -> Dict[str, Any]:
         # If no metrics, just get unique combinations of dimensions
         df = df[request.dimensions].drop_duplicates()
     
+    # Prepare visualization data if visualization metrics are specified
+    visualization_data = []
+    if request.visualization_metrics:
+        # Ensure all visualization metrics exist in the dataframe
+        if not all(metric in df.columns for metric in request.visualization_metrics):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid visualization metrics requested"
+            )
+        
+        # Create visualization data with index dimension and selected metrics
+        vis_df = df[request.dimensions + request.visualization_metrics].copy()
+        
+        # If we have multiple dimensions, we need to aggregate the data
+        if len(request.dimensions) > 1:
+            # Use the first dimension as the index for visualization
+            index_dim = request.dimensions[0]
+            other_dims = request.dimensions[1:]
+            
+            # Group by the index dimension and aggregate metrics
+            agg_dict = {metric: 'sum' for metric in request.visualization_metrics}
+            vis_df = vis_df.groupby(index_dim, as_index=False).agg(agg_dict)
+        
+        # Use the index dimension as the x-axis
+        vis_df['index'] = vis_df[request.dimensions[0]]
+        visualization_data = vis_df.to_dict(orient="records")
+    
     return {
         "data": df.to_dict(orient="records"),
-        "total_rows": len(df)
+        "total_rows": len(df),
+        "visualization_data": visualization_data
     }
 
 @app.post("/download/filtered")
