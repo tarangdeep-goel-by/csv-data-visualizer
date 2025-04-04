@@ -21,7 +21,7 @@ import {
   Legend,
   ResponsiveContainer
 } from 'recharts';
-import { Metadata as MetadataType, CompleteData, FilterState } from './types';
+import { Metadata as MetadataType, CompleteData, FilterState, ValueFilter } from './types';
 
 interface VisualizationProps {
   metadata: MetadataType | null;
@@ -38,9 +38,6 @@ export const Visualization: React.FC<VisualizationProps> = ({
   filterState,
   onVisualizationMetricsChange
 }) => {
-  // TODO: Fix rendering when multiple values are selected for the same dimension
-  // Currently, the visualization might show duplicate or incorrect data points
-  // Need to ensure proper aggregation and display of data when multiple dimension values are selected
   if (!metadata || !completeData) return null;
 
   const handleMetricToggle = (metric: string) => {
@@ -66,6 +63,33 @@ export const Visualization: React.FC<VisualizationProps> = ({
   // Only show metrics that are currently in the view
   const availableMetrics = filterState.metrics;
 
+  // Find the dimension that has multiple values selected for comparison
+  const comparisonFilter = filterState.filters.find(filter => 
+    filter.filter.type === 'value' && 
+    (filter.filter as ValueFilter).values.length > 1
+  );
+
+  // Get all metric columns from visualization data
+  const getMetricColumns = () => {
+    if (!completeData.visualization_data.length) return [];
+    const firstRow = completeData.visualization_data[0];
+    const excludeColumns = ['index', metadata.dimension_flags.index_dimension];
+    return Object.keys(firstRow).filter(key => !excludeColumns.includes(key));
+  };
+
+  // Format tooltip value based on whether it's a comparison view or not
+  const formatTooltipValue = (value: number, name: string) => {
+    if (comparisonFilter) {
+      // For comparison view, the name includes both metric and dimension value
+      const match = name.match(/^(.*?) \((.*?): (.*?)\)$/);
+      if (match) {
+        const [_, metric, dimension, dimensionValue] = match;
+        return [`${metric}: ${value.toLocaleString()}`, `${dimension}: ${dimensionValue}`];
+      }
+    }
+    return [`${name}: ${value.toLocaleString()}`, name];
+  };
+
   return (
     <Paper 
       elevation={2}
@@ -79,13 +103,15 @@ export const Visualization: React.FC<VisualizationProps> = ({
     >
       <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
         <Typography variant="h5" sx={{ fontWeight: 600 }}>
-          Visualization {loading && <CircularProgress size={20} sx={{ ml: 2 }} />}
+          {comparisonFilter ? 
+            `Comparing ${comparisonFilter.column} Values` : 
+            'Visualization'} {loading && <CircularProgress size={20} sx={{ ml: 2 }} />}
         </Typography>
         <FormControl sx={{ minWidth: 200 }}>
           <InputLabel>Select Metrics</InputLabel>
           <Select
             multiple
-            value={filterState.visualization_metrics.filter(m => availableMetrics.includes(m))} // Only show selected metrics that are still available
+            value={filterState.visualization_metrics.filter(m => availableMetrics.includes(m))}
             onChange={(e) => onVisualizationMetricsChange(e.target.value as string[])}
             label="Select Metrics"
             disabled={loading}
@@ -114,6 +140,25 @@ export const Visualization: React.FC<VisualizationProps> = ({
         </Stack>
       </Box>
 
+      {comparisonFilter && (
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="subtitle2" gutterBottom>
+            Comparing values for {comparisonFilter.column}:
+          </Typography>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            {(comparisonFilter.filter as ValueFilter).values.map((value, index) => (
+              <Chip
+                key={value}
+                label={value}
+                color="primary"
+                variant="outlined"
+                sx={{ borderColor: colors[index % colors.length], color: colors[index % colors.length] }}
+              />
+            ))}
+          </Stack>
+        </Box>
+      )}
+
       <Box sx={{ height: 400, width: '100%' }}>
         {completeData.visualization_data.length > 0 && filterState.visualization_metrics.some(m => availableMetrics.includes(m)) ? (
           <ResponsiveContainer>
@@ -128,7 +173,7 @@ export const Visualization: React.FC<VisualizationProps> = ({
             >
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis 
-                dataKey="index" 
+                dataKey="index"
                 label={{ 
                   value: metadata.dimension_flags.index_dimension,
                   position: 'bottom',
@@ -144,9 +189,7 @@ export const Visualization: React.FC<VisualizationProps> = ({
                 }}
               />
               <Tooltip 
-                formatter={(value: number, name: string) => {
-                  return [`${name}: ${value.toLocaleString()}`, name];
-                }}
+                formatter={formatTooltipValue}
                 labelFormatter={(label: string) => {
                   return `${metadata.dimension_flags.index_dimension}: ${label}`;
                 }}
@@ -166,18 +209,16 @@ export const Visualization: React.FC<VisualizationProps> = ({
                 }}
               />
               <Legend />
-              {filterState.visualization_metrics
-                .filter(metric => availableMetrics.includes(metric)) // Only show lines for metrics that are still available
-                .map((metric, index) => (
-                  <Line
-                    key={metric}
-                    type="monotone"
-                    dataKey={metric}
-                    stroke={colors[index % colors.length]}
-                    activeDot={{ r: 8 }}
-                    dot={false}
-                  />
-                ))}
+              {getMetricColumns().map((column, index) => (
+                <Line
+                  key={column}
+                  type="monotone"
+                  dataKey={column}
+                  stroke={colors[index % colors.length]}
+                  activeDot={{ r: 8 }}
+                  dot={false}
+                />
+              ))}
             </LineChart>
           </ResponsiveContainer>
         ) : (

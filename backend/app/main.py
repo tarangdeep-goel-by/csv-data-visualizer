@@ -263,46 +263,89 @@ async def filter_data(request: FilterRequest) -> Dict[str, Any]:
             detail="Invalid columns requested"
         )
     
-    # Group by dimensions and aggregate metrics
+    # Create a copy for table data
+    table_df = df.copy()
+    
+    # Group by dimensions and aggregate metrics for table data
     if request.metrics:
         agg_dict = {metric: 'sum' for metric in request.metrics}
-        df = df.groupby(request.dimensions, as_index=False).agg(agg_dict)
+        table_df = table_df.groupby(request.dimensions, as_index=False).agg(agg_dict)
         # Round numeric values after aggregation
-        df = round_numeric_values(df, request.metrics)
+        table_df = round_numeric_values(table_df, request.metrics)
     else:
         # If no metrics, just get unique combinations of dimensions
-        df = df[request.dimensions].drop_duplicates()
+        table_df = table_df[request.dimensions].drop_duplicates()
     
     # Prepare visualization data if visualization metrics are specified
     visualization_data = []
     if request.visualization_metrics:
+        # Create a copy for visualization data
+        vis_df = df[request.dimensions + request.visualization_metrics].copy()
+        
         # Ensure all visualization metrics exist in the dataframe
-        if not all(metric in df.columns for metric in request.visualization_metrics):
+        if not all(metric in vis_df.columns for metric in request.visualization_metrics):
             raise HTTPException(
                 status_code=400,
                 detail="Invalid visualization metrics requested"
             )
         
-        # Create visualization data with index dimension and selected metrics
-        vis_df = df[request.dimensions + request.visualization_metrics].copy()
+        # Find if there's a dimension with multiple values selected for comparison
+        comparison_filter = next(
+            (f for f in request.filters if f.filter.type == "value" and len(f.filter.values) > 1),
+            None
+        )
         
-        # If we have multiple dimensions, we need to aggregate the data
-        if len(request.dimensions) > 1:
-            # Use the first dimension as the index for visualization
+        if comparison_filter and comparison_filter.column in request.dimensions:
+            # For comparison view, we need to keep both the index dimension and comparison dimension
             index_dim = request.dimensions[0]
-            other_dims = request.dimensions[1:]
+            comparison_dim = comparison_filter.column
             
-            # Group by the index dimension and aggregate metrics
-            agg_dict = {metric: 'sum' for metric in request.visualization_metrics}
-            vis_df = vis_df.groupby(index_dim, as_index=False).agg(agg_dict)
+            # Create separate series for each value in the comparison dimension
+            result_dfs = []
+            for value in comparison_filter.filter.values:
+                # Filter data for this specific value
+                value_df = vis_df[vis_df[comparison_dim] == value].copy()
+                
+                # Group by index dimension first
+                agg_dict = {metric: 'sum' for metric in request.visualization_metrics}
+                value_df = value_df.groupby(index_dim, as_index=False).agg(agg_dict)
+                
+                # Rename metrics to include the dimension value
+                for metric in request.visualization_metrics:
+                    value_df[f"{metric} ({comparison_dim}: {value})"] = value_df[metric]
+                    value_df.drop(columns=[metric], inplace=True)
+                
+                # Keep only necessary columns
+                value_df = value_df[[index_dim] + [f"{metric} ({comparison_dim}: {value})" for metric in request.visualization_metrics]]
+                result_dfs.append(value_df)
+            
+            # Merge all value-specific dataframes on the index dimension
+            if result_dfs:
+                vis_df = result_dfs[0]
+                for df in result_dfs[1:]:
+                    vis_df = pd.merge(vis_df, df, on=index_dim, how='outer')
+            
+            # Set the index column
+            vis_df['index'] = vis_df[index_dim]
+            
+        else:
+            # Regular aggregation for non-comparison view
+            if len(request.dimensions) > 1:
+                # Use the first dimension as the index for visualization
+                index_dim = request.dimensions[0]
+                
+                # Group by the index dimension and aggregate metrics
+                agg_dict = {metric: 'sum' for metric in request.visualization_metrics}
+                vis_df = vis_df.groupby(index_dim, as_index=False).agg(agg_dict)
+            
+            # Use the index dimension as the x-axis
+            vis_df['index'] = vis_df[request.dimensions[0]]
         
-        # Use the index dimension as the x-axis
-        vis_df['index'] = vis_df[request.dimensions[0]]
         visualization_data = vis_df.to_dict(orient="records")
     
     return {
-        "data": df.to_dict(orient="records"),
-        "total_rows": len(df),
+        "data": table_df.to_dict(orient="records"),
+        "total_rows": len(table_df),
         "visualization_data": visualization_data
     }
 
