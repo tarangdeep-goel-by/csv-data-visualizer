@@ -46,16 +46,27 @@ class FilterRequest(BaseModel):
     filters: List[ColumnFilter]
     visualization_metrics: Optional[List[str]] = None
 
-def classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
+async def classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
     """Classify columns as dimensions (string) or metrics (numeric)."""
+    if df.empty or len(df.columns) == 0:
+        raise HTTPException(status_code=400, detail="Invalid CSV file: File is empty")
+
     dimensions = []
     metrics = []
     
-    for column in df.columns:
-        if pd.api.types.is_numeric_dtype(df[column]):
-            metrics.append(column)
-        else:
-            dimensions.append(column)
+    try:
+        for column in df.columns:
+            # Check if all values in the column are numeric
+            if df[column].dtype.kind in 'biufc' and df[column].apply(lambda x: pd.api.types.is_numeric_dtype(type(x))).all():
+                metrics.append(column)
+            else:
+                dimensions.append(column)
+                
+        # If all columns are dimensions, raise an error
+        if not metrics:
+            raise HTTPException(status_code=400, detail="Error processing file: No numeric metrics found")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error processing file: {str(e)}")
     
     return {
         "dimensions": dimensions,
@@ -77,19 +88,31 @@ def aggregate_data(df: pd.DataFrame, dimensions: List[str], metrics: List[str]) 
 
 def apply_filters(df: pd.DataFrame, filters: List[ColumnFilter]) -> pd.DataFrame:
     """Apply filters to the dataframe."""
-    if not filters:
-        return df
+    df_copy = df.copy()
     
-    for column_filter in filters:
-        column = column_filter.column
-        filter_data = column_filter.filter
+    for filter_item in filters:
+        column = filter_item.column
+        filter_data = filter_item.filter
+        
+        # Validate column exists
+        if column not in df_copy.columns:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid filter: column '{column}' does not exist"
+            )
         
         if filter_data.type == "value":
-            df = df[df[column].isin(filter_data.values)]
+            df_copy = df_copy[df_copy[column].isin(filter_data.values)]
         elif filter_data.type == "range":
-            df = df[(df[column] >= filter_data.min) & (df[column] <= filter_data.max)]
+            # Validate range values
+            if filter_data.min > filter_data.max:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid range filter for column '{column}': min value cannot be greater than max value"
+                )
+            df_copy = df_copy[(df_copy[column] >= filter_data.min) & (df_copy[column] <= filter_data.max)]
     
-    return df
+    return df_copy
 
 def round_numeric_values(df: pd.DataFrame, metrics: List[str]) -> pd.DataFrame:
     """Round numeric values in metric columns to 2 decimal places."""
@@ -101,38 +124,54 @@ def round_numeric_values(df: pd.DataFrame, metrics: List[str]) -> pd.DataFrame:
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)) -> Dict[str, Any]:
-    # Read the CSV file
-    df = pd.read_csv(file.file)
+    # Validate file format
+    if not file.filename.endswith('.csv') or file.content_type != "text/csv":
+        raise HTTPException(status_code=400, detail="Invalid file format. Only CSV files are supported.")
     
-    # Save the original file
-    file_path = os.path.join("data", "original_data.csv")
-    df.to_csv(file_path, index=False)
-    
-    # Classify columns
-    column_classifications = classify_columns(df)
-    
-    # Set default index dimension
-    index_dimension = get_default_index_dimension(column_classifications["dimensions"])
-    
-    # Generate metadata
-    metadata = {
-        "columns": df.columns.tolist(),
-        "row_count": len(df),
-        "column_types": df.dtypes.astype(str).to_dict(),
-        "sample_data": df.head(5).to_dict(orient="records"),
-        "column_classifications": column_classifications,
-        "dimension_flags": {
-            "index_dimension": index_dimension,
-            "time_dimension": None
+    try:
+        # Read the CSV file
+        df = pd.read_csv(file.file)
+        
+        # Ensure the file has at least one row and one column
+        if df.empty or len(df.columns) == 0:
+            raise HTTPException(status_code=400, detail="Invalid CSV file: File is empty or has no columns")
+        
+        # Save the original file
+        os.makedirs("data", exist_ok=True)
+        file_path = os.path.join("data", "original_data.csv")
+        df.to_csv(file_path, index=False)
+        
+        # Classify columns
+        column_classifications = await classify_columns(df)
+        
+        # Set default index dimension
+        index_dimension = get_default_index_dimension(column_classifications["dimensions"])
+        
+        # Generate metadata
+        metadata = {
+            "columns": df.columns.tolist(),
+            "row_count": len(df),
+            "column_types": df.dtypes.astype(str).to_dict(),
+            "sample_data": df.head(5).to_dict(orient="records"),
+            "column_classifications": column_classifications,
+            "dimension_flags": {
+                "index_dimension": index_dimension,
+                "time_dimension": None
+            }
         }
-    }
-    
-    # Save metadata
-    metadata_path = os.path.join("data", "metadata.json")
-    with open(metadata_path, "w") as f:
-        json.dump(metadata, f)
-    
-    return metadata
+        
+        # Save metadata
+        metadata_path = os.path.join("data", "metadata.json")
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f)
+        
+        return metadata
+    except pd.errors.EmptyDataError:
+        raise HTTPException(status_code=400, detail="Invalid CSV file: File is empty")
+    except pd.errors.ParserError:
+        raise HTTPException(status_code=400, detail="Invalid CSV file: Unable to parse file")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error processing file: {str(e)}")
 
 @app.get("/metadata")
 async def get_metadata() -> Dict[str, Any]:
@@ -167,14 +206,28 @@ async def update_classifications(classifications: Dict[str, List[str]]) -> Dict[
     with open(metadata_path, "r") as f:
         metadata = json.load(f)
     
+    # Validate that all required keys exist
+    if not all(key in classifications for key in ["dimensions", "metrics"]):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid classifications: must include both 'dimensions' and 'metrics'"
+        )
+    
     # Validate that all columns exist
     all_columns = set(metadata["columns"])
     provided_columns = set(classifications["dimensions"] + classifications["metrics"])
     
-    if not all_columns.issubset(provided_columns):
+    if not provided_columns.issubset(all_columns):
         raise HTTPException(
             status_code=400,
-            detail="Invalid classifications: some columns are missing or extra"
+            detail="Invalid classifications: some columns do not exist in the dataset"
+        )
+    
+    # Validate that each column is classified exactly once
+    if len(provided_columns) != len(classifications["dimensions"]) + len(classifications["metrics"]):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid classifications: columns must be classified exactly once"
         )
     
     metadata["column_classifications"] = classifications
