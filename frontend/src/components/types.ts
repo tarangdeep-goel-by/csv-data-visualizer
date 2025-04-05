@@ -16,6 +16,7 @@ export interface Metadata {
 export interface CompleteData {
   data: Record<string, any>[]
   total_rows: number
+  visualization_data: Record<string, any>[]
 }
 
 export interface ValueFilter {
@@ -40,6 +41,7 @@ export interface FilterState {
   dimensions: string[]
   metrics: string[]
   filters: ColumnFilter[]
+  visualization_metrics: string[]
 }
 
 export interface AppProps {

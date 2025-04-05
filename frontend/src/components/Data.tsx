@@ -28,6 +28,40 @@ import { Metadata as MetadataType, CompleteData, FilterState, ColumnFilter, Valu
 import { Filter } from './Filter'
 import { useState } from 'react'
 
+/**
+ * TODO: Data Component Improvements
+ * 
+ * 1. Column Sorting
+ *    - Add sortable headers to all columns
+ *    - Implement both ascending and descending sort
+ *    - Allow sorting by multiple columns (shift+click)
+ *    - Visual indicators for sort direction
+ *    - Server-side sorting for large datasets
+ * 
+ * 2. Drag and Drop Column Reordering
+ *    - Implement drag handles for columns
+ *    - Visual feedback during drag operation
+ *    - Smooth animation when reordering
+ *    - Save column order in user preferences
+ *    - Consider using react-beautiful-dnd or @dnd-kit/sortable
+ * 
+ * 3. Column Management Improvements
+ *    - Replace current "Add to View" with a more intuitive interface
+ *    - Add a dedicated column management panel/drawer
+ *    - Group columns by type (dimension/metric)
+ *    - Search/filter available columns
+ *    - Show column metadata (type, description, etc.)
+ *    - Quick actions (hide/show, pin, etc.)
+ * 
+ * 4. Dimension/Metric Separation
+ *    - Visually separate dimensions and metrics in the table
+ *    - Different styling/background for dimension vs metric columns
+ *    - Option to group all dimensions to left/right
+ *    - Sticky dimension columns option
+ *    - Clear labeling of column types
+ *    - Different aggregation options for metrics
+ */
+
 interface DataProps {
   metadata: MetadataType | null
   completeData: CompleteData | null

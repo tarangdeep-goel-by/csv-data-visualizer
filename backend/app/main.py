@@ -3,17 +3,27 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 import pandas as pd
 import os
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List
 import json
-from pydantic import BaseModel
 from io import StringIO
 
-app = FastAPI()
+from .models import DimensionFlags, FilterRequest
+from .utils import (
+    classify_columns,
+    get_default_index_dimension,
+    aggregate_data,
+    apply_filters,
+    round_numeric_values,
+    validate_column_classifications
+)
+from .config import settings
+
+app = FastAPI(title="Data Analysis API", version="1.0.0")
 
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Frontend URL
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -21,133 +31,28 @@ app.add_middleware(
 )
 
 # Create data directory if it doesn't exist
-os.makedirs("data", exist_ok=True)
-
-class DimensionFlags(BaseModel):
-    index_dimension: str
-    time_dimension: Optional[str] = None
-
-class ValueFilter(BaseModel):
-    type: str = "value"
-    values: List[str]
-
-class RangeFilter(BaseModel):
-    type: str = "range"
-    min: float
-    max: float
-
-class ColumnFilter(BaseModel):
-    column: str
-    filter: Union[ValueFilter, RangeFilter]
-
-class FilterRequest(BaseModel):
-    dimensions: List[str]
-    metrics: List[str]
-    filters: List[ColumnFilter]
-    visualization_metrics: Optional[List[str]] = None
-
-async def classify_columns(df: pd.DataFrame) -> Dict[str, List[str]]:
-    """Classify columns as dimensions (string) or metrics (numeric)."""
-    if df.empty or len(df.columns) == 0:
-        raise HTTPException(status_code=400, detail="Invalid CSV file: File is empty")
-
-    dimensions = []
-    metrics = []
-    
-    try:
-        for column in df.columns:
-            # Check if all values in the column are numeric
-            if df[column].dtype.kind in 'biufc' and df[column].apply(lambda x: pd.api.types.is_numeric_dtype(type(x))).all():
-                metrics.append(column)
-            else:
-                dimensions.append(column)
-                
-        # If all columns are dimensions, raise an error
-        if not metrics:
-            raise HTTPException(status_code=400, detail="Error processing file: No numeric metrics found")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error processing file: {str(e)}")
-    
-    return {
-        "dimensions": dimensions,
-        "metrics": metrics
-    }
-
-def get_default_index_dimension(dimensions: List[str]) -> str:
-    """Get the first dimension as the default index dimension."""
-    return dimensions[0] if dimensions else None
-
-def aggregate_data(df: pd.DataFrame, dimensions: List[str], metrics: List[str]) -> pd.DataFrame:
-    """Aggregate data based on specified dimensions and metrics."""
-    if not dimensions:
-        return df
-    
-    # Group by dimensions and aggregate metrics
-    agg_dict = {metric: 'sum' for metric in metrics}
-    return df.groupby(dimensions).agg(agg_dict).reset_index()
-
-def apply_filters(df: pd.DataFrame, filters: List[ColumnFilter]) -> pd.DataFrame:
-    """Apply filters to the dataframe."""
-    df_copy = df.copy()
-    
-    for filter_item in filters:
-        column = filter_item.column
-        filter_data = filter_item.filter
-        
-        # Validate column exists
-        if column not in df_copy.columns:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid filter: column '{column}' does not exist"
-            )
-        
-        if filter_data.type == "value":
-            df_copy = df_copy[df_copy[column].isin(filter_data.values)]
-        elif filter_data.type == "range":
-            # Validate range values
-            if filter_data.min > filter_data.max:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid range filter for column '{column}': min value cannot be greater than max value"
-                )
-            df_copy = df_copy[(df_copy[column] >= filter_data.min) & (df_copy[column] <= filter_data.max)]
-    
-    return df_copy
-
-def round_numeric_values(df: pd.DataFrame, metrics: List[str]) -> pd.DataFrame:
-    """Round numeric values in metric columns to 2 decimal places."""
-    df_copy = df.copy()
-    for column in df_copy.columns:
-        if pd.api.types.is_numeric_dtype(df_copy[column]):
-            df_copy[column] = df_copy[column].round(2)
-    return df_copy
+os.makedirs(settings.DATA_DIR, exist_ok=True)
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)) -> Dict[str, Any]:
-    # Validate file format
+    """Upload and process a CSV file."""
     if not file.filename.endswith('.csv') or file.content_type != "text/csv":
         raise HTTPException(status_code=400, detail="Invalid file format. Only CSV files are supported.")
     
     try:
-        # Read the CSV file
         df = pd.read_csv(file.file)
         
-        # Ensure the file has at least one row and one column
         if df.empty or len(df.columns) == 0:
             raise HTTPException(status_code=400, detail="Invalid CSV file: File is empty or has no columns")
         
-        # Save the original file
-        os.makedirs("data", exist_ok=True)
-        file_path = os.path.join("data", "original_data.csv")
-        df.to_csv(file_path, index=False)
+        # Create data directory and save the original file
+        os.makedirs(settings.DATA_DIR, exist_ok=True)
+        df.to_csv(settings.get_data_path(), index=False)
         
-        # Classify columns
-        column_classifications = await classify_columns(df)
-        
-        # Set default index dimension
+        # Classify columns and generate metadata
+        column_classifications = classify_columns(df)
         index_dimension = get_default_index_dimension(column_classifications["dimensions"])
         
-        # Generate metadata
         metadata = {
             "columns": df.columns.tolist(),
             "row_count": len(df),
@@ -161,11 +66,11 @@ async def upload_file(file: UploadFile = File(...)) -> Dict[str, Any]:
         }
         
         # Save metadata
-        metadata_path = os.path.join("data", "metadata.json")
-        with open(metadata_path, "w") as f:
+        with open(settings.get_metadata_path(), "w") as f:
             json.dump(metadata, f)
         
         return metadata
+        
     except pd.errors.EmptyDataError:
         raise HTTPException(status_code=400, detail="Invalid CSV file: File is empty")
     except pd.errors.ParserError:
@@ -175,22 +80,20 @@ async def upload_file(file: UploadFile = File(...)) -> Dict[str, Any]:
 
 @app.get("/metadata")
 async def get_metadata() -> Dict[str, Any]:
-    metadata_path = os.path.join("data", "metadata.json")
-    
-    if not os.path.exists(metadata_path):
+    """Get metadata for the uploaded file."""
+    if not os.path.exists(settings.get_metadata_path()):
         return {"error": "No metadata found"}
     
-    with open(metadata_path, "r") as f:
+    with open(settings.get_metadata_path(), "r") as f:
         return json.load(f)
 
 @app.get("/data")
 async def get_data() -> Dict[str, Any]:
-    file_path = os.path.join("data", "original_data.csv")
-    
-    if not os.path.exists(file_path):
+    """Get the complete dataset."""
+    if not os.path.exists(settings.get_data_path()):
         raise HTTPException(status_code=404, detail="No data file found")
     
-    df = pd.read_csv(file_path)
+    df = pd.read_csv(settings.get_data_path())
     return {
         "data": df.to_dict(orient="records"),
         "total_rows": len(df)
@@ -198,272 +101,203 @@ async def get_data() -> Dict[str, Any]:
 
 @app.put("/metadata/classifications")
 async def update_classifications(classifications: Dict[str, List[str]]) -> Dict[str, Any]:
-    metadata_path = os.path.join("data", "metadata.json")
-    
-    if not os.path.exists(metadata_path):
+    """Update column classifications."""
+    if not os.path.exists(settings.get_metadata_path()):
         raise HTTPException(status_code=404, detail="No metadata found")
     
-    with open(metadata_path, "r") as f:
+    with open(settings.get_metadata_path(), "r") as f:
         metadata = json.load(f)
     
-    # Validate that all required keys exist
-    if not all(key in classifications for key in ["dimensions", "metrics"]):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid classifications: must include both 'dimensions' and 'metrics'"
-        )
-    
-    # Validate that all columns exist
-    all_columns = set(metadata["columns"])
-    provided_columns = set(classifications["dimensions"] + classifications["metrics"])
-    
-    if not provided_columns.issubset(all_columns):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid classifications: some columns do not exist in the dataset"
-        )
-    
-    # Validate that each column is classified exactly once
-    if len(provided_columns) != len(classifications["dimensions"]) + len(classifications["metrics"]):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid classifications: columns must be classified exactly once"
-        )
-    
+    validate_column_classifications(metadata["columns"], classifications)
     metadata["column_classifications"] = classifications
     
-    with open(metadata_path, "w") as f:
+    with open(settings.get_metadata_path(), "w") as f:
         json.dump(metadata, f)
     
     return metadata
 
 @app.put("/metadata/dimension-flags")
 async def update_dimension_flags(flags: DimensionFlags) -> Dict[str, Any]:
-    metadata_path = os.path.join("data", "metadata.json")
-    
-    if not os.path.exists(metadata_path):
+    """Update dimension flags."""
+    if not os.path.exists(settings.get_metadata_path()):
         raise HTTPException(status_code=404, detail="No metadata found")
     
-    with open(metadata_path, "r") as f:
+    with open(settings.get_metadata_path(), "r") as f:
         metadata = json.load(f)
     
-    # Validate that the columns exist in the dataset
+    # First check if the columns exist in the dataset
     all_columns = set(metadata["columns"])
-    
     if flags.index_dimension not in all_columns:
         raise HTTPException(
             status_code=400,
-            detail="Invalid index dimension: column does not exist"
+            detail="column does not exist"
         )
     
     if flags.time_dimension and flags.time_dimension not in all_columns:
         raise HTTPException(
             status_code=400,
-            detail="Invalid time dimension: column does not exist"
+            detail="column does not exist"
         )
     
-    metadata["dimension_flags"] = {
-        "index_dimension": flags.index_dimension,
-        "time_dimension": flags.time_dimension
-    }
+    # Then check if they are dimensions
+    dimensions = metadata["column_classifications"]["dimensions"]
+    if flags.index_dimension not in dimensions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid index dimension: '{flags.index_dimension}' is not a dimension"
+        )
     
-    with open(metadata_path, "w") as f:
+    if flags.time_dimension and flags.time_dimension not in dimensions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid time dimension: '{flags.time_dimension}' is not a dimension"
+        )
+    
+    metadata["dimension_flags"] = flags.model_dump()
+    
+    with open(settings.get_metadata_path(), "w") as f:
         json.dump(metadata, f)
     
     return metadata
 
 @app.get("/download")
 async def download_file():
-    file_path = os.path.join("data", "original_data.csv")
-    
-    if not os.path.exists(file_path):
+    """Download the complete dataset."""
+    if not os.path.exists(settings.get_data_path()):
         raise HTTPException(status_code=404, detail="No data file found")
     
-    return FileResponse(
-        file_path,
-        media_type="text/csv",
-        filename="data.csv",
-        headers={"Content-Disposition": "attachment; filename=data.csv"}
-    )
+    return FileResponse(settings.get_data_path(), filename="data.csv")
 
 @app.post("/data/filter")
 async def filter_data(request: FilterRequest) -> Dict[str, Any]:
-    file_path = os.path.join("data", "original_data.csv")
-    
-    if not os.path.exists(file_path):
+    """Filter and aggregate data based on specified criteria."""
+    if not os.path.exists(settings.get_data_path()):
         raise HTTPException(status_code=404, detail="No data file found")
     
-    df = pd.read_csv(file_path)
-    
-    # If no dimensions selected, return empty result
-    if not request.dimensions:
-        return {
-            "data": [],
-            "total_rows": 0,
-            "visualization_data": []
-        }
-    
-    # Apply filters first if any
-    if request.filters:
-        df = apply_filters(df, request.filters)
-    
-    # Ensure all requested dimensions exist in dataframe
-    all_columns = set(df.columns)
-    requested_columns = set(request.dimensions + request.metrics)
-    if not requested_columns.issubset(all_columns):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid columns requested"
-        )
-    
-    # Create a copy for table data
-    table_df = df.copy()
-    
-    # Group by dimensions and aggregate metrics for table data
-    if request.metrics:
-        agg_dict = {metric: 'sum' for metric in request.metrics}
-        table_df = table_df.groupby(request.dimensions, as_index=False).agg(agg_dict)
-        # Round numeric values after aggregation
-        table_df = round_numeric_values(table_df, request.metrics)
-    else:
-        # If no metrics, just get unique combinations of dimensions
-        table_df = table_df[request.dimensions].drop_duplicates()
-    
-    # Prepare visualization data if visualization metrics are specified
-    visualization_data = []
-    if request.visualization_metrics:
-        # Create a copy for visualization data
-        vis_df = df[request.dimensions + request.visualization_metrics].copy()
+    try:
+        df = pd.read_csv(settings.get_data_path())
         
-        # Ensure all visualization metrics exist in the dataframe
-        if not all(metric in vis_df.columns for metric in request.visualization_metrics):
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid visualization metrics requested"
+        # Validate requested columns exist
+        all_columns = set(df.columns)
+        requested_columns = set(request.dimensions + request.metrics)
+        if not requested_columns.issubset(all_columns):
+            raise HTTPException(status_code=400, detail="Invalid columns requested")
+        
+        # Apply filters
+        filtered_df = apply_filters(df, request.filters)
+        
+        # Aggregate data for table view
+        result_df = aggregate_data(filtered_df, request.dimensions, request.metrics)
+        result_df = round_numeric_values(result_df)
+        
+        # Prepare visualization data if metrics are specified
+        visualization_data = []
+        if request.visualization_metrics:
+            vis_df = filtered_df.copy()
+            
+            # Find if there's a dimension with multiple values for comparison
+            comparison_filter = next(
+                (f for f in request.filters if f.filter.type == "value" and len(f.filter.values) > 1),
+                None
             )
-        
-        # Find if there's a dimension with multiple values selected for comparison
-        comparison_filter = next(
-            (f for f in request.filters if f.filter.type == "value" and len(f.filter.values) > 1),
-            None
-        )
-        
-        if comparison_filter and comparison_filter.column in request.dimensions:
-            # For comparison view, we need to keep both the index dimension and comparison dimension
-            index_dim = request.dimensions[0]
-            comparison_dim = comparison_filter.column
             
-            # Create separate series for each value in the comparison dimension
-            result_dfs = []
-            for value in comparison_filter.filter.values:
-                # Filter data for this specific value
-                value_df = vis_df[vis_df[comparison_dim] == value].copy()
-                
-                # Group by index dimension first
-                agg_dict = {metric: 'sum' for metric in request.visualization_metrics}
-                value_df = value_df.groupby(index_dim, as_index=False).agg(agg_dict)
-                
-                # Rename metrics to include the dimension value
-                for metric in request.visualization_metrics:
-                    value_df[f"{metric} ({comparison_dim}: {value})"] = value_df[metric]
-                    value_df.drop(columns=[metric], inplace=True)
-                
-                # Keep only necessary columns
-                value_df = value_df[[index_dim] + [f"{metric} ({comparison_dim}: {value})" for metric in request.visualization_metrics]]
-                result_dfs.append(value_df)
-            
-            # Merge all value-specific dataframes on the index dimension
-            if result_dfs:
-                vis_df = result_dfs[0]
-                for df in result_dfs[1:]:
-                    vis_df = pd.merge(vis_df, df, on=index_dim, how='outer')
-            
-            # Set the index column
-            vis_df['index'] = vis_df[index_dim]
-            
-        else:
-            # Regular aggregation for non-comparison view
-            if len(request.dimensions) > 1:
-                # Use the first dimension as the index for visualization
+            if comparison_filter and comparison_filter.column in request.dimensions:
+                # For comparison view, create separate series for each value
                 index_dim = request.dimensions[0]
+                comparison_dim = comparison_filter.column
                 
-                # Group by the index dimension and aggregate metrics
-                agg_dict = {metric: 'sum' for metric in request.visualization_metrics}
-                vis_df = vis_df.groupby(index_dim, as_index=False).agg(agg_dict)
-            
-            # Use the index dimension as the x-axis
-            vis_df['index'] = vis_df[request.dimensions[0]]
+                result_dfs = []
+                for value in comparison_filter.filter.values:
+                    value_df = vis_df[vis_df[comparison_dim] == value].copy()
+                    agg_dict = {metric: 'sum' for metric in request.visualization_metrics}
+                    value_df = value_df.groupby(index_dim, as_index=False).agg(agg_dict)
+                    
+                    # Rename metrics to include the dimension value
+                    for metric in request.visualization_metrics:
+                        value_df[f"{metric} ({comparison_dim}: {value})"] = value_df[metric]
+                        value_df.drop(columns=[metric], inplace=True)
+                    
+                    result_dfs.append(value_df)
+                
+                # Merge all value-specific dataframes
+                if result_dfs:
+                    vis_df = result_dfs[0]
+                    for df in result_dfs[1:]:
+                        vis_df = pd.merge(vis_df, df, on=index_dim, how='outer')
+                    vis_df = round_numeric_values(vis_df)
+                    visualization_data = vis_df.to_dict(orient="records")
+            else:
+                # Regular aggregation for non-comparison view
+                if request.dimensions:
+                    index_dim = request.dimensions[0]
+                    agg_dict = {metric: 'sum' for metric in request.visualization_metrics}
+                    vis_df = vis_df.groupby(index_dim, as_index=False).agg(agg_dict)
+                    vis_df = round_numeric_values(vis_df)
+                    visualization_data = vis_df.to_dict(orient="records")
         
-        visualization_data = vis_df.to_dict(orient="records")
-    
-    return {
-        "data": table_df.to_dict(orient="records"),
-        "total_rows": len(table_df),
-        "visualization_data": visualization_data
-    }
+        return {
+            "data": result_df.to_dict(orient="records"),
+            "total_rows": len(result_df),
+            "visualization_data": visualization_data
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/download/filtered")
 async def download_filtered_data(filter_request: FilterRequest):
-    file_path = os.path.join("data", "original_data.csv")
-    
-    if not os.path.exists(file_path):
+    """Download filtered and aggregated data."""
+    if not os.path.exists(settings.get_data_path()):
         raise HTTPException(status_code=404, detail="No data file found")
     
-    df = pd.read_csv(file_path)
-    
-    # Apply filters
-    if filter_request.filters:
-        df = apply_filters(df, filter_request.filters)
-    
-    # Ensure all requested columns exist
-    all_columns = set(df.columns)
-    requested_columns = set(filter_request.dimensions + filter_request.metrics)
-    if not requested_columns.issubset(all_columns):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid columns requested"
+    try:
+        df = pd.read_csv(settings.get_data_path())
+        
+        # Validate requested columns exist
+        all_columns = set(df.columns)
+        requested_columns = set(filter_request.dimensions + filter_request.metrics)
+        if not requested_columns.issubset(all_columns):
+            raise HTTPException(status_code=400, detail="Invalid columns requested")
+        
+        # Apply filters
+        filtered_df = apply_filters(df, filter_request.filters)
+        
+        # Select only requested columns and preserve null values
+        result_df = filtered_df[filter_request.dimensions + filter_request.metrics].copy()
+        
+        # Create CSV string
+        output = StringIO()
+        result_df.to_csv(output, index=False, na_rep='')
+        
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=filtered_data.csv"}
         )
-    
-    # Select only requested columns
-    df = df[filter_request.dimensions + filter_request.metrics]
-    
-    # Round numeric values before creating CSV
-    df = round_numeric_values(df, filter_request.metrics)
-    
-    # Create CSV string
-    csv_string = df.to_csv(index=False)
-    
-    return StreamingResponse(
-        StringIO(csv_string),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=filtered_data.csv"}
-    )
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/data/unique-values/{column}")
 async def get_unique_values(column: str, filter_request: FilterRequest) -> Dict[str, List[str]]:
-    """Get unique values for a specific column based on current filters."""
-    file_path = os.path.join("data", "original_data.csv")
-    
-    if not os.path.exists(file_path):
+    """Get unique values for a column with optional filtering."""
+    if not os.path.exists(settings.get_data_path()):
         raise HTTPException(status_code=404, detail="No data file found")
     
-    df = pd.read_csv(file_path)
-    
-    if column not in df.columns:
-        raise HTTPException(status_code=400, detail="Column not found")
-    
-    # Apply existing filters first
-    if filter_request.filters:
-        df = apply_filters(df, filter_request.filters)
-    
-    # Round numeric values if the column is numeric
-    if pd.api.types.is_numeric_dtype(df[column]):
-        df[column] = df[column].round(2)
-    
-    # Get unique values for the requested column
-    unique_values = df[column].unique().tolist()
-    # Convert all values to strings for consistency
-    unique_values = [str(val) for val in unique_values if pd.notna(val)]
-    unique_values.sort()
-    
-    return {"values": unique_values} 
+    try:
+        df = pd.read_csv(settings.get_data_path())
+        
+        if column not in df.columns:
+            raise HTTPException(status_code=400, detail="Column not found")
+        
+        filtered_df = apply_filters(df, filter_request.filters)
+        unique_values = filtered_df[column].unique().tolist()
+        
+        # Convert numeric values to strings and handle NaN/None
+        unique_values = [str(val) if pd.notna(val) else None for val in unique_values]
+        unique_values = [val for val in unique_values if val is not None]
+        
+        return {"values": sorted(unique_values)}
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) 
