@@ -128,12 +128,15 @@ export const Data = ({
         p: 4,
         mb: 3,
         borderRadius: 2,
-        border: '1px solid',
-        borderColor: 'grey.200'
+        backgroundColor: 'background.paper',
+        border: 'none'
       }}
     >
       <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h5" sx={{ fontWeight: 600 }}>
+        <Typography variant="h5" sx={{ 
+          fontWeight: 600,
+          color: 'text.primary'
+        }}>
           Complete Dataset {loading && <CircularProgress size={20} sx={{ ml: 2 }} />}
         </Typography>
         <Stack direction="row" spacing={2}>
@@ -145,7 +148,13 @@ export const Data = ({
               py: 1.5,
               px: 3,
               borderRadius: 2,
-              textTransform: 'none'
+              textTransform: 'none',
+              borderColor: 'rgba(255, 255, 255, 0.12)',
+              color: 'text.primary',
+              '&:hover': {
+                borderColor: 'rgba(255, 255, 255, 0.3)',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)'
+              }
             }}
           >
             Download View
@@ -161,7 +170,13 @@ export const Data = ({
               py: 1.5,
               px: 3,
               borderRadius: 2,
-              textTransform: 'none'
+              textTransform: 'none',
+              borderColor: 'rgba(255, 255, 255, 0.12)',
+              color: 'text.primary',
+              '&:hover': {
+                borderColor: 'rgba(255, 255, 255, 0.3)',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)'
+              }
             }}
           >
             Manage View
@@ -183,33 +198,66 @@ export const Data = ({
           maxHeight: 600,
           overflow: 'auto',
           '& .MuiTableCell-root': {
-            whiteSpace: 'nowrap'
+            whiteSpace: 'nowrap',
+            color: '#bdb8ae',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.12)',
+            padding: '0.5rem 1rem',
+            fontSize: '0.9rem'
+          },
+          '& .MuiTableCell-head': {
+            backgroundColor: '#1e1e30',
+            color: '#bdb8ae',
+            fontWeight: 600,
+            position: 'sticky',
+            top: 0,
+            zIndex: 1
+          },
+          '& .MuiTableCell-body': {
+            backgroundColor: '#1e1e30'
+          },
+          '& .sticky-column': {
+            position: 'sticky',
+            left: 0,
+            backgroundColor: '#1e1e30',
+            zIndex: 2,
+            '&.MuiTableCell-head': {
+              zIndex: 3
+            }
           }
         }}
       >
         <Table size="small" stickyHeader>
           <TableHead>
             <TableRow>
-              {[...filterState.dimensions, ...filterState.metrics].map((column) => (
+              {[...filterState.dimensions, ...filterState.metrics].map((column, index) => (
                 <TableCell 
                   key={`header-${column}`}
-                  sx={{
-                    backgroundColor: 'background.paper',
-                    position: 'sticky',
-                    top: 0,
-                    zIndex: 1
-                  }}
+                  className={index === 0 ? 'sticky-column' : ''}
+                  align={index === 0 ? 'left' : 'right'}
                 >
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    {renderColumnHeader(column)}
+                  <Stack 
+                    direction="row" 
+                    spacing={1} 
+                    alignItems="center"
+                    justifyContent={index === 0 ? 'flex-start' : 'flex-end'}
+                  >
+                    <Typography variant="subtitle2" component="span">
+                      {column}
+                    </Typography>
                     {column !== metadata?.dimension_flags.index_dimension && (
                       <Tooltip title="Remove from view">
                         <IconButton
                           size="small"
                           onClick={() => onRemoveFromView(column)}
-                          color="primary"
+                          sx={{
+                            color: 'text.secondary',
+                            padding: '2px',
+                            '&:hover': {
+                              backgroundColor: 'rgba(255, 255, 255, 0.05)'
+                            }
+                          }}
                         >
-                          <FilterListIcon fontSize="small" />
+                          <FilterListIcon sx={{ fontSize: '1rem' }} />
                         </IconButton>
                       </Tooltip>
                     )}
@@ -219,10 +267,25 @@ export const Data = ({
             </TableRow>
           </TableHead>
           <TableBody>
-            {completeData.data.map((row, index) => (
-              <TableRow key={index}>
-                {[...filterState.dimensions, ...filterState.metrics].map((column) => (
-                  <TableCell key={`data-${column}`}>{row[column]}</TableCell>
+            {completeData.data.map((row, rowIndex) => (
+              <TableRow 
+                key={rowIndex}
+                sx={{
+                  '&:hover': {
+                    '& .MuiTableCell-body': {
+                      backgroundColor: '#212130'
+                    }
+                  }
+                }}
+              >
+                {[...filterState.dimensions, ...filterState.metrics].map((column, colIndex) => (
+                  <TableCell 
+                    key={`${rowIndex}-${column}`}
+                    className={colIndex === 0 ? 'sticky-column' : ''}
+                    align={colIndex === 0 ? 'left' : 'right'}
+                  >
+                    {row[column]}
+                  </TableCell>
                 ))}
               </TableRow>
             ))}

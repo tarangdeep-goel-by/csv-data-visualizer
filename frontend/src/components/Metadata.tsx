@@ -67,12 +67,15 @@ export const Metadata = ({
         p: 4,
         mb: 3,
         borderRadius: 2,
-        border: '1px solid',
-        borderColor: 'grey.200'
+        backgroundColor: 'background.paper',
+        border: 'none'
       }}
     >
       <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h5" sx={{ fontWeight: 600 }}>
+        <Typography variant="h5" sx={{ 
+          fontWeight: 600,
+          color: 'text.primary'
+        }}>
           Dataset Metadata
         </Typography>
         <Stack direction="row" spacing={2}>
@@ -84,7 +87,13 @@ export const Metadata = ({
               py: 1.5,
               px: 3,
               borderRadius: 2,
-              textTransform: 'none'
+              textTransform: 'none',
+              borderColor: 'rgba(255, 255, 255, 0.12)',
+              color: 'text.primary',
+              '&:hover': {
+                borderColor: 'rgba(255, 255, 255, 0.3)',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)'
+              }
             }}
           >
             Manage Classifications
@@ -97,7 +106,13 @@ export const Metadata = ({
               py: 1.5,
               px: 3,
               borderRadius: 2,
-              textTransform: 'none'
+              textTransform: 'none',
+              borderColor: 'rgba(255, 255, 255, 0.12)',
+              color: 'text.primary',
+              '&:hover': {
+                borderColor: 'rgba(255, 255, 255, 0.3)',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)'
+              }
             }}
           >
             Download CSV
@@ -132,7 +147,12 @@ export const Metadata = ({
         </Typography>
         <Stack direction="row" spacing={2}>
           <Box>
-            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+            <Typography 
+              variant="subtitle2" 
+              color="text.secondary" 
+              gutterBottom
+              sx={{ opacity: 0.7 }}
+            >
               Dimensions ({metadata.column_classifications.dimensions.length})
             </Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
@@ -149,40 +169,45 @@ export const Metadata = ({
                         {isTime && <AccessTimeIcon sx={{ fontSize: 16 }} />}
                       </Stack>
                     }
-                    color="primary"
-                    variant="outlined"
-                    size="small"
-                    sx={{ fontSize: '0.85rem' }}
+                    sx={{ 
+                      fontSize: '0.85rem',
+                      backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                      color: 'text.primary',
+                      border: 'none',
+                      '& .MuiChip-label': {
+                        color: 'text.primary'
+                      }
+                    }}
                   />
                 );
               })}
             </Box>
           </Box>
           <Box>
-            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+            <Typography 
+              variant="subtitle2" 
+              color="text.secondary" 
+              gutterBottom
+              sx={{ opacity: 0.7 }}
+            >
               Metrics ({metadata.column_classifications.metrics.length})
             </Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-              {metadata.column_classifications.metrics.map((column) => {
-                const isIndex = metadata.dimension_flags.index_dimension === column;
-                const isTime = metadata.dimension_flags.time_dimension === column;
-                return (
-                  <Chip 
-                    key={`metric-${column}`}
-                    label={
-                      <Stack direction="row" spacing={0.5} alignItems="center">
-                        <span>{column}</span>
-                        {isIndex && <KeyIcon sx={{ fontSize: 16 }} />}
-                        {isTime && <AccessTimeIcon sx={{ fontSize: 16 }} />}
-                      </Stack>
+              {metadata.column_classifications.metrics.map((column) => (
+                <Chip 
+                  key={`metric-${column}`}
+                  label={column}
+                  sx={{ 
+                    fontSize: '0.85rem',
+                    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                    color: 'text.primary',
+                    border: 'none',
+                    '& .MuiChip-label': {
+                      color: 'text.primary'
                     }
-                    color="secondary"
-                    variant="outlined"
-                    size="small"
-                    sx={{ fontSize: '0.85rem' }}
-                  />
-                );
-              })}
+                  }}
+                />
+              ))}
             </Box>
           </Box>
         </Stack>

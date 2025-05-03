@@ -9,7 +9,8 @@ import {
   MenuItem,
   Chip,
   Stack,
-  CircularProgress
+  CircularProgress,
+  useTheme
 } from '@mui/material';
 import {
   LineChart,
@@ -22,6 +23,7 @@ import {
   ResponsiveContainer
 } from 'recharts';
 import { Metadata as MetadataType, CompleteData, FilterState, ValueFilter } from './types';
+import { metricColors } from '../theme';
 
 interface VisualizationProps {
   metadata: MetadataType | null;
@@ -38,6 +40,8 @@ export const Visualization: React.FC<VisualizationProps> = ({
   filterState,
   onVisualizationMetricsChange
 }) => {
+  const theme = useTheme();
+
   if (!metadata || !completeData) return null;
 
   const handleMetricToggle = (metric: string) => {
@@ -47,18 +51,12 @@ export const Visualization: React.FC<VisualizationProps> = ({
     onVisualizationMetricsChange(newMetrics);
   };
 
-  const colors = [
-    '#8884d8',
-    '#82ca9d',
-    '#ffc658',
-    '#ff7300',
-    '#ff0000',
-    '#00C49F',
-    '#FFBB28',
-    '#FF8042',
-    '#0088FE',
-    '#00C49F'
-  ];
+  // Get color for a metric based on its index
+  const getMetricColor = (index: number) => {
+    const colorKeys = Object.keys(metricColors);
+    const colorKey = colorKeys[index % colorKeys.length];
+    return metricColors[colorKey as keyof typeof metricColors].main;
+  };
 
   // Only show metrics that are currently in the view
   const availableMetrics = filterState.metrics;
@@ -97,24 +95,32 @@ export const Visualization: React.FC<VisualizationProps> = ({
         p: 4,
         mb: 3,
         borderRadius: 2,
-        border: '1px solid',
-        borderColor: 'grey.200'
+        backgroundColor: 'background.paper',
+        border: 'none'
       }}
     >
       <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h5" sx={{ fontWeight: 600 }}>
+        <Typography variant="h5" sx={{ 
+          fontWeight: 600,
+          color: 'text.primary'
+        }}>
           {comparisonFilter ? 
             `Comparing ${comparisonFilter.column} Values` : 
             'Visualization'} {loading && <CircularProgress size={20} sx={{ ml: 2 }} />}
         </Typography>
         <FormControl sx={{ minWidth: 200 }}>
-          <InputLabel>Select Metrics</InputLabel>
+          <InputLabel sx={{ color: 'text.secondary' }}>Select Metrics</InputLabel>
           <Select
             multiple
             value={filterState.visualization_metrics.filter(m => availableMetrics.includes(m))}
             onChange={(e) => onVisualizationMetricsChange(e.target.value as string[])}
             label="Select Metrics"
             disabled={loading}
+            sx={{
+              '& .MuiOutlinedInput-notchedOutline': {
+                borderColor: 'rgba(255, 255, 255, 0.12)'
+              }
+            }}
           >
             {availableMetrics.map((metric) => (
               <MenuItem key={metric} value={metric}>
@@ -125,116 +131,91 @@ export const Visualization: React.FC<VisualizationProps> = ({
         </FormControl>
       </Stack>
 
-      <Box sx={{ mb: 2 }}>
-        <Typography variant="subtitle2" gutterBottom>Selected Metrics:</Typography>
-        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          {availableMetrics.map((metric) => (
-            <Chip
-              key={metric}
-              label={metric}
-              onClick={() => handleMetricToggle(metric)}
-              color={filterState.visualization_metrics.includes(metric) ? "primary" : "default"}
-              variant={filterState.visualization_metrics.includes(metric) ? "filled" : "outlined"}
-            />
-          ))}
-        </Stack>
-      </Box>
-
-      {comparisonFilter && (
-        <Box sx={{ mb: 2 }}>
-          <Typography variant="subtitle2" gutterBottom>
-            Comparing values for {comparisonFilter.column}:
-          </Typography>
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            {(comparisonFilter.filter as ValueFilter).values.map((value, index) => (
-              <Chip
-                key={value}
-                label={value}
-                color="primary"
-                variant="outlined"
-                sx={{ borderColor: colors[index % colors.length], color: colors[index % colors.length] }}
-              />
-            ))}
-          </Stack>
-        </Box>
-      )}
-
       <Box sx={{ height: 400, width: '100%' }}>
-        {completeData.visualization_data.length > 0 && filterState.visualization_metrics.some(m => availableMetrics.includes(m)) ? (
+        {completeData.visualization_data.length > 0 && filterState.visualization_metrics.some(m => availableMetrics.includes(m)) ?
           <ResponsiveContainer>
             <LineChart
               data={completeData.visualization_data}
               margin={{
-                top: 5,
+                top: 20,
                 right: 30,
                 left: 20,
-                bottom: 5,
+                bottom: 20,
               }}
             >
-              <CartesianGrid strokeDasharray="3 3" />
+              <CartesianGrid 
+                strokeDasharray="3 3" 
+                vertical={false}
+                stroke="rgba(255, 255, 255, 0.12)"
+              />
               <XAxis 
                 dataKey="index"
-                label={{ 
-                  value: metadata.dimension_flags.index_dimension,
-                  position: 'bottom',
-                  offset: 0
-                }}
+                stroke="#bdb8ae"
+                tick={{ fill: '#bdb8ae' }}
+                tickLine={{ stroke: '#bdb8ae' }}
+                axisLine={{ stroke: '#bdb8ae' }}
               />
               <YAxis 
-                label={{ 
-                  value: 'Value',
-                  angle: -90,
-                  position: 'insideLeft',
-                  offset: 0
-                }}
+                stroke="#bdb8ae"
+                tick={{ fill: '#bdb8ae' }}
+                tickLine={{ stroke: '#bdb8ae' }}
+                axisLine={{ stroke: '#bdb8ae' }}
               />
               <Tooltip 
-                formatter={formatTooltipValue}
-                labelFormatter={(label: string) => {
-                  return `${metadata.dimension_flags.index_dimension}: ${label}`;
-                }}
                 contentStyle={{
-                  backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                  border: '1px solid #ccc',
-                  borderRadius: '4px'
+                  backgroundColor: '#1e1e30',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  borderRadius: '4px',
+                  color: '#e1e1e1'
                 }}
                 itemStyle={{
-                  color: '#666',
-                  fontWeight: 'bold'
+                  color: '#bdb8ae'
                 }}
                 labelStyle={{
-                  color: '#333',
+                  color: '#e1e1e1',
                   fontWeight: 'bold',
-                  marginBottom: '4px'
+                  marginBottom: '8px'
+                }}
+                formatter={formatTooltipValue}
+              />
+              <Legend 
+                wrapperStyle={{
+                  color: '#bdb8ae'
                 }}
               />
-              <Legend />
-              {getMetricColumns().map((column, index) => (
-                <Line
-                  key={column}
-                  type="monotone"
-                  dataKey={column}
-                  stroke={colors[index % colors.length]}
-                  activeDot={{ r: 8 }}
-                  dot={false}
-                />
-              ))}
+              {getMetricColumns().map((column, index) => {
+                const color = getMetricColor(index);
+                return (
+                  <Line
+                    key={column}
+                    type="monotone"
+                    dataKey={column}
+                    name={column}
+                    stroke={color}
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 6, fill: color }}
+                    fill={`${color}20`}
+                  />
+                );
+              })}
             </LineChart>
           </ResponsiveContainer>
-        ) : (
+        :
           <Box
             sx={{
               height: '100%',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center'
+              justifyContent: 'center',
+              color: 'text.secondary'
             }}
           >
-            <Typography color="text.secondary">
+            <Typography>
               Select metrics to visualize
             </Typography>
           </Box>
-        )}
+        }
       </Box>
     </Paper>
   );
