@@ -9,6 +9,8 @@ import { Metadata } from './components/Metadata'
 import { Data } from './components/Data'
 import { Metadata as MetadataType, CompleteData, FilterState, ColumnFilter } from './components/types'
 import { Visualization } from './components/Visualization'
+import { VersionManager } from './components/VersionManager/VersionManager'
+import type { Version } from './components/VersionManager/types'
 
 function App() {
   const theme = useTheme()
@@ -33,6 +35,9 @@ function App() {
     visualization_metrics: []
   })
   const [pendingMetadata, setPendingMetadata] = useState<MetadataType | null>(null)
+  const [versions, setVersions] = useState<Version[]>([])
+  const [currentVersionId, setCurrentVersionId] = useState<string | null>(null)
+  const [parentId, setParentId] = useState<string | null>(null)
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
@@ -76,6 +81,9 @@ function App() {
 
       setMetadata(response.data);
       setPendingMetadata(response.data);
+      setParentId(response.data.parent_id);
+      setCurrentVersionId(null);
+      setVersions([]);
       
       // Initialize filter state with index dimension and all metrics
       const initialFilterState = {
@@ -349,12 +357,138 @@ function App() {
     await fetchCompleteData(newFilterState);
   };
 
+  // Update version management handlers
+  const handleSaveVersion = async (name: string, description: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      if (!parentId) throw new Error('No parentId set. Please upload a file first.');
+      // Save current view as new version
+      const response = await axios.post(`http://localhost:8000/versions/save?parent_id=${parentId}`,
+        {
+          filter_criteria: filterState,  // Send filter state as a nested object
+          name,
+          description
+        }
+      );
+      // Update versions list
+      const versionsResponse = await axios.get(`http://localhost:8000/versions/list?parent_id=${parentId}`);
+      setVersions(versionsResponse.data);
+      // Set as current version
+      setCurrentVersionId(response.data.id);
+    } catch (err) {
+      console.error('Error saving version:', err);
+      if (axios.isAxiosError(err)) {
+        setError(`Error saving version: ${err.response?.data?.detail || err.message}`);
+      } else {
+        setError('Error saving version. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLoadVersion = async (versionId: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Activate the version's snapshot as the current data file
+      await axios.post(`http://localhost:8000/versions/${versionId}/activate`);
+
+      // Fetch the new metadata (as if a new file was uploaded)
+      const metadataResponse = await axios.get('http://localhost:8000/metadata');
+      const newMetadata = metadataResponse.data;
+      setMetadata(newMetadata);
+      setPendingMetadata(newMetadata);
+
+      // Initialize filter state with index dimension and all metrics
+      const initialFilterState = {
+        dimensions: [newMetadata.dimension_flags.index_dimension],
+        metrics: newMetadata.column_classifications.metrics,
+        filters: [],
+        visualization_metrics: []
+      };
+      setFilterState(initialFilterState);
+      setTempFilterState(initialFilterState);
+
+      // Set as current version
+      setCurrentVersionId(versionId);
+
+      // Fetch data with new filter state (now using the snapshot file)
+      await fetchCompleteData(initialFilterState);
+
+    } catch (err) {
+      console.error('Error loading version:', err);
+      if (axios.isAxiosError(err)) {
+        setError(`Error loading version: ${err.response?.data?.detail || err.message}`);
+      } else {
+        setError('Error loading version. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteVersion = async (versionId: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      if (!parentId) throw new Error('No parentId set. Please upload a file first.');
+      // Delete version
+      await axios.delete(`http://localhost:8000/versions/${versionId}`);
+      // Update versions list
+      const versionsResponse = await axios.get(`http://localhost:8000/versions/list?parent_id=${parentId}`);
+      setVersions(versionsResponse.data);
+      // If deleted version was current, reset to original
+      if (versionId === currentVersionId) {
+        setCurrentVersionId(null);
+        // Reset to original data
+        await fetchCompleteData(filterState);
+      }
+    } catch (err) {
+      console.error('Error deleting version:', err);
+      if (axios.isAxiosError(err)) {
+        setError(`Error deleting version: ${err.response?.data?.detail || err.message}`);
+      } else {
+        setError('Error deleting version. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Add effect to fetch versions on mount and when metadata changes
+  useEffect(() => {
+    const fetchVersions = async () => {
+      if (metadata && parentId) {  // Only fetch versions if we have data loaded and parentId
+        try {
+          const response = await axios.get(`http://localhost:8000/versions/list?parent_id=${parentId}`);
+          setVersions(response.data);
+        } catch (err) {
+          console.error('Error fetching versions:', err);
+        }
+      }
+    };
+    fetchVersions();
+  }, [metadata, parentId]);  // Re-fetch when metadata or parentId changes
+
   return (
     <Box sx={{ 
       minHeight: '100vh',
       bgcolor: 'background.default',
       p: 4
     }}>
+      <header className="App-header">
+        <h1>Data Analysis Tool</h1>
+        <VersionManager
+          onSaveVersion={handleSaveVersion}
+          onLoadVersion={handleLoadVersion}
+          onDeleteVersion={handleDeleteVersion}
+          versions={versions}
+          currentVersionId={currentVersionId}
+        />
+      </header>
       <Upload
         file={file}
         loading={loading}

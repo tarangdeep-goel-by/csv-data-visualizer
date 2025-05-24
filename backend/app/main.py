@@ -3,11 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 import pandas as pd
 import os
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import json
 from io import StringIO
+import shutil
+import uuid
 
-from .models import DimensionFlags, FilterRequest
+from .models import DimensionFlags, FilterRequest, Version, SaveVersionRequest
 from .utils import (
     classify_columns,
     get_default_index_dimension,
@@ -17,6 +19,7 @@ from .utils import (
     validate_column_classifications
 )
 from .config import settings
+from .version_manager import version_manager
 
 app = FastAPI(title="Data Analysis API", version="1.0.0")
 
@@ -69,7 +72,10 @@ async def upload_file(file: UploadFile = File(...)) -> Dict[str, Any]:
         with open(settings.get_metadata_path(), "w") as f:
             json.dump(metadata, f)
         
-        return metadata
+        # Generate a new parent_id for this upload
+        parent_id = str(uuid.uuid4())
+        
+        return {**metadata, "parent_id": parent_id}
         
     except pd.errors.EmptyDataError:
         raise HTTPException(status_code=400, detail="Invalid CSV file: File is empty")
@@ -300,4 +306,89 @@ async def get_unique_values(column: str, filter_request: FilterRequest) -> Dict[
         return {"values": sorted(unique_values)}
         
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e)) 
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/versions/save")
+async def save_version(request: SaveVersionRequest, parent_id: str) -> Version:
+    filter_criteria = request.filter_criteria
+    name = request.name
+    description = request.description
+    created_by = request.created_by
+    if not os.path.exists(settings.get_metadata_path()):
+        raise HTTPException(status_code=404, detail="No metadata found")
+    
+    if not os.path.exists(settings.get_data_path()):
+        raise HTTPException(status_code=404, detail="No data file found")
+    
+    # Get current metadata state
+    with open(settings.get_metadata_path(), "r") as f:
+        metadata = json.load(f)
+    
+    # Create version
+    version = version_manager.create_version(
+        parent_id=parent_id,
+        name=name,
+        description=description,
+        created_by=created_by,
+        filter_criteria=filter_criteria,
+        metadata_state={
+            "column_classifications": metadata["column_classifications"],
+            "dimension_flags": metadata["dimension_flags"]
+        },
+        current_data_path=settings.get_data_path()
+    )
+    
+    return version
+
+@app.get("/versions/list")
+async def list_versions(parent_id: str) -> List[Version]:
+    """List all versions for a parent document."""
+    return version_manager.list_versions(parent_id)
+
+@app.get("/versions/{version_id}")
+async def get_version_details(version_id: str) -> Version:
+    """Get details of a specific version."""
+    version = version_manager.get_version(version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail="Version not found")
+    return version
+
+@app.post("/versions/{version_id}/load")
+async def load_version(version_id: str) -> Dict[str, Any]:
+    """Load a specific version's state."""
+    try:
+        return version_manager.load_version(version_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@app.delete("/versions/{version_id}")
+async def delete_version(version_id: str) -> Dict[str, bool]:
+    """Delete a version."""
+    success = version_manager.delete_version(version_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Version not found")
+    return {"success": True}
+
+@app.post("/versions/{version_id}/activate")
+async def activate_version(version_id: str) -> Dict[str, Any]:
+    """Activate a version's snapshot as the current data file and restore its metadata."""
+    version = version_manager.get_version(version_id)
+    if not version or not version.data_path or not os.path.exists(version.data_path):
+        raise HTTPException(status_code=404, detail="Version snapshot not found")
+
+    # Copy the snapshot CSV to the main data file location
+    shutil.copy2(version.data_path, settings.get_data_path())
+
+    # Restore metadata state
+    metadata = {
+        "columns": pd.read_csv(version.data_path).columns.tolist(),
+        "row_count": sum(1 for _ in open(version.data_path)) - 1,  # minus header
+        "column_types": pd.read_csv(version.data_path, nrows=1).dtypes.astype(str).to_dict(),
+        "sample_data": pd.read_csv(version.data_path, nrows=5).to_dict(orient="records"),
+        "column_classifications": version.metadata_state["column_classifications"],
+        "dimension_flags": version.metadata_state["dimension_flags"]
+    }
+    with open(settings.get_metadata_path(), "w") as f:
+        json.dump(metadata, f)
+
+    return {"success": True} 
