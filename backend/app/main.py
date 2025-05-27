@@ -391,4 +391,129 @@ async def activate_version(version_id: str) -> Dict[str, Any]:
     with open(settings.get_metadata_path(), "w") as f:
         json.dump(metadata, f)
 
-    return {"success": True} 
+    return {"success": True}
+
+@app.get("/files/list")
+async def list_uploaded_files() -> List[Dict[str, Any]]:
+    """List all uploaded files with their parent_ids and basic metadata."""
+    try:
+        files_info = []
+        
+        # Get all versions to extract unique parent_ids and file info
+        all_versions = version_manager._load_metadata()["versions"]
+        parent_ids_seen = set()
+        
+        for version_data in all_versions:
+            parent_id = version_data["parent_id"]
+            if parent_id not in parent_ids_seen and version_data.get("is_active", True):
+                parent_ids_seen.add(parent_id)
+                
+                # Get the first version (original upload) and most recent version
+                file_versions = [v for v in all_versions if v["parent_id"] == parent_id and v.get("is_active", True)]
+                file_versions.sort(key=lambda x: x["created_at"])
+                first_version = Version(**file_versions[0])
+                most_recent_version = Version(**file_versions[-1])
+                
+                file_info = {
+                    "parent_id": parent_id,
+                    "original_filename": first_version.description or first_version.name,  # Use description as filename if available
+                    "first_version_name": first_version.name,
+                    "first_version_created": first_version.created_at,
+                    "first_version_created_by": first_version.created_by,
+                    "most_recent_version_name": most_recent_version.name,
+                    "most_recent_version_created": most_recent_version.created_at,
+                    "version_count": len(file_versions)
+                }
+                
+                # Try to get column info from the most recent version's data
+                if most_recent_version.data_path and os.path.exists(most_recent_version.data_path):
+                    try:
+                        sample_df = pd.read_csv(most_recent_version.data_path, nrows=1)
+                        file_info["columns"] = sample_df.columns.tolist()
+                        file_info["column_count"] = len(sample_df.columns)
+                    except:
+                        file_info["columns"] = []
+                        file_info["column_count"] = 0
+                else:
+                    file_info["columns"] = []
+                    file_info["column_count"] = 0
+                
+                files_info.append(file_info)
+        
+        # Sort by creation date (newest first)
+        files_info.sort(key=lambda x: x["first_version_created"], reverse=True)
+        return files_info
+        
+    except Exception as e:
+        return []
+
+@app.post("/files/{parent_id}/activate")
+async def activate_file(parent_id: str) -> Dict[str, Any]:
+    """Activate a file by its parent_id (load the most recent version of that file)."""
+    try:
+        # Get all versions for this parent_id
+        versions = version_manager.list_versions(parent_id)
+        if not versions:
+            raise HTTPException(status_code=404, detail="No versions found for this file")
+        
+        # Get the most recent version
+        most_recent_version = versions[0]  # Already sorted by date descending
+        
+        # Activate it
+        if not most_recent_version.data_path or not os.path.exists(most_recent_version.data_path):
+            raise HTTPException(status_code=404, detail="Version data file not found")
+        
+        # Copy the snapshot CSV to the main data file location
+        shutil.copy2(most_recent_version.data_path, settings.get_data_path())
+        
+        # Restore metadata state
+        metadata = {
+            "columns": pd.read_csv(most_recent_version.data_path).columns.tolist(),
+            "row_count": sum(1 for _ in open(most_recent_version.data_path)) - 1,
+            "column_types": pd.read_csv(most_recent_version.data_path, nrows=1).dtypes.astype(str).to_dict(),
+            "sample_data": pd.read_csv(most_recent_version.data_path, nrows=5).to_dict(orient="records"),
+            "column_classifications": most_recent_version.metadata_state["column_classifications"],
+            "dimension_flags": most_recent_version.metadata_state["dimension_flags"]
+        }
+        with open(settings.get_metadata_path(), "w") as f:
+            json.dump(metadata, f)
+        
+        return {
+            "success": True,
+            "parent_id": parent_id,
+            "activated_version": most_recent_version.model_dump(),
+            "metadata": metadata
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error activating file: {str(e)}")
+
+@app.delete("/files/{parent_id}")
+async def delete_file(parent_id: str) -> Dict[str, Any]:
+    """Delete a file and all its versions."""
+    try:
+        # Get all versions for this parent_id
+        versions = version_manager.list_versions(parent_id)
+        if not versions:
+            raise HTTPException(status_code=404, detail="No versions found for this file")
+        
+        # Delete all versions
+        deleted_count = 0
+        for version in versions:
+            success = version_manager.delete_version(version.id)
+            if success:
+                deleted_count += 1
+        
+        return {
+            "success": True,
+            "parent_id": parent_id,
+            "deleted_versions": deleted_count,
+            "message": f"Successfully deleted file and {deleted_count} version(s)"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting file: {str(e)}") 

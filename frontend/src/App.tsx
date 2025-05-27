@@ -11,6 +11,7 @@ import { Metadata as MetadataType, CompleteData, FilterState, ColumnFilter } fro
 import { Visualization } from './components/Visualization'
 import { VersionManager } from './components/VersionManager/VersionManager'
 import type { Version } from './components/VersionManager/types'
+import { FileManager, FileInfo } from './components/FileManager'
 
 function App() {
   const theme = useTheme()
@@ -38,6 +39,7 @@ function App() {
   const [versions, setVersions] = useState<Version[]>([])
   const [currentVersionId, setCurrentVersionId] = useState<string | null>(null)
   const [parentId, setParentId] = useState<string | null>(null)
+  const [currentFileName, setCurrentFileName] = useState<string | null>(null)
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
@@ -84,6 +86,7 @@ function App() {
       setParentId(response.data.parent_id);
       setCurrentVersionId(null);
       setVersions([]);
+      setCurrentFileName(file.name);
       
       // Initialize filter state with index dimension and all metrics
       const initialFilterState = {
@@ -95,6 +98,27 @@ function App() {
       setFilterState(initialFilterState);
       setTempFilterState(initialFilterState);
       await fetchCompleteData(initialFilterState);
+      
+      // Automatically create an initial version with the original filename
+      try {
+        await axios.post(`http://localhost:8000/versions/save?parent_id=${response.data.parent_id}`, {
+          filter_criteria: initialFilterState,
+          name: "Initial upload",
+          description: file.name, // Save original filename in description
+          created_by: "default_user"
+        });
+        
+        // Fetch the updated versions list
+        const versionsResponse = await axios.get(`http://localhost:8000/versions/list?parent_id=${response.data.parent_id}`);
+        setVersions(versionsResponse.data);
+        if (versionsResponse.data.length > 0) {
+          setCurrentVersionId(versionsResponse.data[0].id);
+        }
+      } catch (versionErr) {
+        console.error('Error creating initial version:', versionErr);
+        // Don't fail the upload if version creation fails
+      }
+      
     } catch (err) {
       if (axios.isAxiosError(err)) {
         const errorMessage = err.response?.data?.detail || err.message;
@@ -393,6 +417,10 @@ function App() {
       setLoading(true);
       setError(null);
 
+      // First, get the version details to retrieve the saved filter criteria
+      const versionResponse = await axios.get(`http://localhost:8000/versions/${versionId}`);
+      const version = versionResponse.data;
+
       // Activate the version's snapshot as the current data file
       await axios.post(`http://localhost:8000/versions/${versionId}/activate`);
 
@@ -402,21 +430,16 @@ function App() {
       setMetadata(newMetadata);
       setPendingMetadata(newMetadata);
 
-      // Initialize filter state with index dimension and all metrics
-      const initialFilterState = {
-        dimensions: [newMetadata.dimension_flags.index_dimension],
-        metrics: newMetadata.column_classifications.metrics,
-        filters: [],
-        visualization_metrics: []
-      };
-      setFilterState(initialFilterState);
-      setTempFilterState(initialFilterState);
+      // Restore the EXACT filter state that was saved with this version
+      const restoredFilterState = version.filter_criteria;
+      setFilterState(restoredFilterState);
+      setTempFilterState(restoredFilterState);
 
       // Set as current version
       setCurrentVersionId(versionId);
 
-      // Fetch data with new filter state (now using the snapshot file)
-      await fetchCompleteData(initialFilterState);
+      // Fetch data with the restored filter state (now using the snapshot file)
+      await fetchCompleteData(restoredFilterState);
 
     } catch (err) {
       console.error('Error loading version:', err);
@@ -473,6 +496,66 @@ function App() {
     fetchVersions();
   }, [metadata, parentId]);  // Re-fetch when metadata or parentId changes
 
+  // File activation handler
+  const handleFileActivate = async (newParentId: string, fileInfo: FileInfo) => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Activate the file (loads most recent version)
+      const response = await axios.post(`http://localhost:8000/files/${newParentId}/activate`);
+      
+      // Set the new context
+      setParentId(newParentId);
+      setCurrentFileName(fileInfo.original_filename || fileInfo.first_version_name);
+      setMetadata(response.data.metadata);
+      setPendingMetadata(response.data.metadata);
+      setCurrentVersionId(response.data.activated_version.id);
+
+      // Restore the filter state from the activated version (most recent version of this file)
+      const restoredFilterState = response.data.activated_version.filter_criteria;
+      setFilterState(restoredFilterState);
+      setTempFilterState(restoredFilterState);
+
+      // Fetch data for the activated file with the restored filter state
+      await fetchCompleteData(restoredFilterState);
+
+    } catch (err) {
+      console.error('Error activating file:', err);
+      if (axios.isAxiosError(err)) {
+        setError(`Error switching to file: ${err.response?.data?.detail || err.message}`);
+      } else {
+        setError('Error switching to file. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // File deletion handler
+  const handleFileDeleted = () => {
+    // Clear current state since the active file was deleted
+    setMetadata(null);
+    setPendingMetadata(null);
+    setCompleteData(null);
+    setParentId(null);
+    setCurrentFileName(null);
+    setCurrentVersionId(null);
+    setVersions([]);
+    setFilterState({
+      dimensions: [],
+      metrics: [],
+      filters: [],
+      visualization_metrics: []
+    });
+    setTempFilterState({
+      dimensions: [],
+      metrics: [],
+      filters: [],
+      visualization_metrics: []
+    });
+  };
+
   return (
     <Box sx={{ 
       minHeight: '100vh',
@@ -481,6 +564,16 @@ function App() {
     }}>
       <header className="App-header">
         <h1>Data Analysis Tool</h1>
+        
+        {/* File Manager - Show if we have any data loaded */}
+        {metadata && (
+          <FileManager
+            currentParentId={parentId}
+            onFileActivate={handleFileActivate}
+            onFileDeleted={handleFileDeleted}
+          />
+        )}
+        
         <VersionManager
           onSaveVersion={handleSaveVersion}
           onLoadVersion={handleLoadVersion}
