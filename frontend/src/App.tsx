@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { 
   Box,
-  useTheme
+  useTheme,
+  Typography
 } from '@mui/material'
 import axios from 'axios'
 import { Upload } from './components/Upload'
@@ -40,6 +41,8 @@ function App() {
   const [currentVersionId, setCurrentVersionId] = useState<string | null>(null)
   const [parentId, setParentId] = useState<string | null>(null)
   const [currentFileName, setCurrentFileName] = useState<string | null>(null)
+  const [hasExistingFiles, setHasExistingFiles] = useState<boolean>(false)
+  const [checkingForFiles, setCheckingForFiles] = useState<boolean>(true)
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
@@ -87,6 +90,7 @@ function App() {
       setCurrentVersionId(null);
       setVersions([]);
       setCurrentFileName(file.name);
+      setHasExistingFiles(true);
       
       // Initialize filter state with index dimension and all metrics
       const initialFilterState = {
@@ -511,6 +515,7 @@ function App() {
       setMetadata(response.data.metadata);
       setPendingMetadata(response.data.metadata);
       setCurrentVersionId(response.data.activated_version.id);
+      setHasExistingFiles(true);
 
       // Restore the filter state from the activated version (most recent version of this file)
       const restoredFilterState = response.data.activated_version.filter_criteria;
@@ -554,7 +559,34 @@ function App() {
       filters: [],
       visualization_metrics: []
     });
+    
+    // Recheck for existing files after deletion
+    const recheckFiles = async () => {
+      try {
+        const response = await axios.get('http://localhost:8000/files/check');
+        setHasExistingFiles(response.data.has_existing_files);
+      } catch (err) {
+        console.error('Error rechecking for existing files:', err);
+        setHasExistingFiles(false);
+      }
+    };
+    recheckFiles();
   };
+
+  // Add effect to check for existing files on app start
+  useEffect(() => {
+    const checkForExistingFiles = async () => {
+      try {
+        const response = await axios.get('http://localhost:8000/files/check');
+        setHasExistingFiles(response.data.has_existing_files);
+      } catch (err) {
+        console.error('Error checking for existing files:', err);
+      } finally {
+        setCheckingForFiles(false);
+      }
+    };
+    checkForExistingFiles();
+  }, []);
 
   return (
     <Box sx={{ 
@@ -565,8 +597,17 @@ function App() {
       <header className="App-header">
         <h1>Data Analysis Tool</h1>
         
-        {/* File Manager - Show if we have any data loaded */}
-        {metadata && (
+        {/* Show loading while checking for existing files */}
+        {checkingForFiles && (
+          <Box sx={{ textAlign: 'center', py: 2 }}>
+            <Typography variant="body2" color="text.secondary">
+              Checking for existing files...
+            </Typography>
+          </Box>
+        )}
+        
+        {/* File Manager - Show if we have any data loaded OR if there are existing files */}
+        {(metadata || hasExistingFiles) && !checkingForFiles && (
           <FileManager
             currentParentId={parentId}
             onFileActivate={handleFileActivate}
@@ -580,6 +621,7 @@ function App() {
           onDeleteVersion={handleDeleteVersion}
           versions={versions}
           currentVersionId={currentVersionId}
+          currentParentId={parentId}
         />
       </header>
       <Upload

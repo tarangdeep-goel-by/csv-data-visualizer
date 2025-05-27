@@ -1,7 +1,50 @@
-import React, { useState } from 'react';
-import { Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, List, ListItem, ListItemText, ListItemSecondaryAction, IconButton } from '@mui/material';
-import { Save as SaveIcon, Delete as DeleteIcon, History as HistoryIcon } from '@mui/icons-material';
+import React, { useState, useEffect } from 'react';
+import { 
+    Button, 
+    Dialog, 
+    DialogTitle, 
+    DialogContent, 
+    DialogActions, 
+    TextField, 
+    List, 
+    ListItem, 
+    ListItemText, 
+    ListItemSecondaryAction, 
+    IconButton,
+    Typography,
+    Chip,
+    Box
+} from '@mui/material';
+import { Save as SaveIcon, Delete as DeleteIcon, History as HistoryIcon, Storage as StorageIcon } from '@mui/icons-material';
 import { Version } from './types';
+import axios from 'axios';
+
+interface StorageUsage {
+    total_size: {
+        bytes: number;
+        readable: string;
+    };
+    total_files: number;
+    total_versions: number;
+    file_breakdown: {
+        [parent_id: string]: {
+            total_size: {
+                bytes: number;
+                readable: string;
+            };
+            version_count: number;
+            versions: Array<{
+                version_id: string;
+                name: string;
+                size: {
+                    bytes: number;
+                    readable: string;
+                };
+                created_at: string;
+            }>;
+        };
+    };
+}
 
 interface VersionManagerProps {
     onSaveVersion: (name: string, description: string) => Promise<void>;
@@ -9,6 +52,7 @@ interface VersionManagerProps {
     onDeleteVersion: (versionId: string) => Promise<void>;
     versions: Version[];
     currentVersionId: string | null;
+    currentParentId: string | null;
 }
 
 export const VersionManager: React.FC<VersionManagerProps> = ({
@@ -16,12 +60,23 @@ export const VersionManager: React.FC<VersionManagerProps> = ({
     onLoadVersion,
     onDeleteVersion,
     versions,
-    currentVersionId
+    currentVersionId,
+    currentParentId
 }) => {
     const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
     const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
     const [versionName, setVersionName] = useState('');
     const [versionDescription, setVersionDescription] = useState('');
+    const [storageUsage, setStorageUsage] = useState<StorageUsage | null>(null);
+
+    const fetchStorageUsage = async () => {
+        try {
+            const response = await axios.get('http://localhost:8000/storage/usage');
+            setStorageUsage(response.data);
+        } catch (err) {
+            console.error('Error fetching storage usage:', err);
+        }
+    };
 
     const handleSaveClick = () => {
         setIsSaveDialogOpen(true);
@@ -29,6 +84,7 @@ export const VersionManager: React.FC<VersionManagerProps> = ({
 
     const handleHistoryClick = () => {
         setIsHistoryDialogOpen(true);
+        fetchStorageUsage();
     };
 
     const handleSave = async () => {
@@ -36,6 +92,10 @@ export const VersionManager: React.FC<VersionManagerProps> = ({
         setVersionName('');
         setVersionDescription('');
         setIsSaveDialogOpen(false);
+        // Refresh storage usage after saving
+        if (isHistoryDialogOpen) {
+            fetchStorageUsage();
+        }
     };
 
     const handleLoad = async (versionId: string) => {
@@ -45,6 +105,8 @@ export const VersionManager: React.FC<VersionManagerProps> = ({
 
     const handleDelete = async (versionId: string) => {
         await onDeleteVersion(versionId);
+        // Refresh storage usage after deletion
+        fetchStorageUsage();
     };
 
     return (
@@ -105,61 +167,87 @@ export const VersionManager: React.FC<VersionManagerProps> = ({
             <Dialog 
                 open={isHistoryDialogOpen} 
                 onClose={() => setIsHistoryDialogOpen(false)}
-                maxWidth="sm"
+                maxWidth="md"
                 fullWidth
             >
                 <DialogTitle>Version History</DialogTitle>
                 <DialogContent>
                     <List>
-                        {versions.map((version) => (
-                            <ListItem 
-                                key={version.id}
-                                sx={{
-                                    backgroundColor: version.id === currentVersionId ? 'action.selected' : 'inherit'
-                                }}
-                            >
-                                <ListItemText
-                                    primary={
-                                        <div style={{ 
-                                            display: 'flex', 
-                                            alignItems: 'center',
-                                            gap: '8px'
-                                        }}>
-                                            {version.name}
-                                            {version.id === currentVersionId && 
-                                                <span style={{ 
-                                                    fontSize: '0.75rem',
-                                                    color: 'text.secondary'
-                                                }}>
-                                                    (Current)
-                                                </span>
-                                            }
-                                        </div>
-                                    }
-                                    secondary={
-                                        <>
-                                            {version.description && <div>{version.description}</div>}
-                                            <div>Created: {new Date(version.created_at).toLocaleString()}</div>
-                                        </>
-                                    }
-                                />
-                                <ListItemSecondaryAction>
-                                    <IconButton 
-                                        edge="end" 
-                                        onClick={() => handleDelete(version.id)}
-                                        disabled={version.id === currentVersionId}
-                                    >
-                                        <DeleteIcon />
-                                    </IconButton>
-                                    <Button
-                                        onClick={() => handleLoad(version.id)}
-                                        disabled={version.id === currentVersionId}
-                                    >
-                                        Load
-                                    </Button>
-                                </ListItemSecondaryAction>
-                            </ListItem>
-                        ))}
+                        {versions.map((version) => {
+                            const versionStorage = storageUsage?.file_breakdown[currentParentId || '']?.versions.find(
+                                v => v.version_id === version.id
+                            );
+                            
+                            return (
+                                <ListItem 
+                                    key={version.id}
+                                    sx={{
+                                        backgroundColor: version.id === currentVersionId ? 'action.selected' : 'inherit',
+                                        mb: 1,
+                                        border: 1,
+                                        borderColor: 'divider',
+                                        borderRadius: 1
+                                    }}
+                                >
+                                    <ListItemText
+                                        primary={
+                                            <Box display="flex" alignItems="center" gap={1} mb={1}>
+                                                <Typography variant="subtitle1">
+                                                    {version.name}
+                                                </Typography>
+                                                {version.id === currentVersionId && (
+                                                    <Chip
+                                                        label="Current"
+                                                        color="primary"
+                                                        size="small"
+                                                    />
+                                                )}
+                                                {versionStorage && (
+                                                    <Chip
+                                                        label={versionStorage.size.readable}
+                                                        color="default"
+                                                        size="small"
+                                                        icon={<StorageIcon />}
+                                                    />
+                                                )}
+                                            </Box>
+                                        }
+                                        secondary={
+                                            <Box>
+                                                {version.description && (
+                                                    <Typography variant="body2" color="text.secondary" mb={1}>
+                                                        {version.description}
+                                                    </Typography>
+                                                )}
+                                                <Typography variant="caption" color="text.secondary">
+                                                    Created: {new Date(version.created_at).toLocaleString()}
+                                                </Typography>
+                                            </Box>
+                                        }
+                                    />
+                                    <ListItemSecondaryAction>
+                                        <Box display="flex" gap={1}>
+                                            <IconButton 
+                                                edge="end" 
+                                                onClick={() => handleDelete(version.id)}
+                                                disabled={version.id === currentVersionId}
+                                                size="small"
+                                            >
+                                                <DeleteIcon />
+                                            </IconButton>
+                                            <Button
+                                                onClick={() => handleLoad(version.id)}
+                                                disabled={version.id === currentVersionId}
+                                                size="small"
+                                                variant="outlined"
+                                            >
+                                                Load
+                                            </Button>
+                                        </Box>
+                                    </ListItemSecondaryAction>
+                                </ListItem>
+                            );
+                        })}
                     </List>
                 </DialogContent>
                 <DialogActions>

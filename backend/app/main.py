@@ -8,6 +8,8 @@ import json
 from io import StringIO
 import shutil
 import uuid
+import logging
+from datetime import datetime, UTC
 
 from .models import DimensionFlags, FilterRequest, Version, SaveVersionRequest
 from .utils import (
@@ -35,6 +37,18 @@ app.add_middleware(
 
 # Create data directory if it doesn't exist
 os.makedirs(settings.DATA_DIR, exist_ok=True)
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def normalize_datetime(dt):
+    """Convert datetime to timezone-aware UTC if it's naive."""
+    if isinstance(dt, str):
+        dt = datetime.fromisoformat(dt.replace('Z', '+00:00'))
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)) -> Dict[str, Any]:
@@ -410,6 +424,11 @@ async def list_uploaded_files() -> List[Dict[str, Any]]:
                 
                 # Get the first version (original upload) and most recent version
                 file_versions = [v for v in all_versions if v["parent_id"] == parent_id and v.get("is_active", True)]
+                
+                # Normalize datetime objects for proper comparison
+                for version in file_versions:
+                    version["created_at"] = normalize_datetime(version["created_at"])
+                
                 file_versions.sort(key=lambda x: x["created_at"])
                 first_version = Version(**file_versions[0])
                 most_recent_version = Version(**file_versions[-1])
@@ -431,7 +450,8 @@ async def list_uploaded_files() -> List[Dict[str, Any]]:
                         sample_df = pd.read_csv(most_recent_version.data_path, nrows=1)
                         file_info["columns"] = sample_df.columns.tolist()
                         file_info["column_count"] = len(sample_df.columns)
-                    except:
+                    except Exception as e:
+                        logger.warning(f"Error reading columns for file {parent_id}: {str(e)}")
                         file_info["columns"] = []
                         file_info["column_count"] = 0
                 else:
@@ -440,12 +460,37 @@ async def list_uploaded_files() -> List[Dict[str, Any]]:
                 
                 files_info.append(file_info)
         
-        # Sort by creation date (newest first)
-        files_info.sort(key=lambda x: x["first_version_created"], reverse=True)
+        # Sort by creation date (newest first) - normalize datetime before comparison
+        files_info.sort(key=lambda x: normalize_datetime(x["first_version_created"]), reverse=True)
         return files_info
         
     except Exception as e:
-        return []
+        logger.error(f"Error fetching file list: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error fetching file list")
+
+@app.get("/files/check")
+async def check_for_existing_files() -> Dict[str, Any]:
+    """Check if there are any existing files in the system."""
+    try:
+        all_versions = version_manager._load_metadata()["versions"]
+        
+        # Check if there are any active files
+        active_files = set()
+        for version_data in all_versions:
+            if version_data.get("is_active", True):
+                active_files.add(version_data["parent_id"])
+        
+        return {
+            "has_existing_files": len(active_files) > 0,
+            "file_count": len(active_files)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error checking for existing files: {str(e)}")
+        return {
+            "has_existing_files": False,
+            "file_count": 0
+        }
 
 @app.post("/files/{parent_id}/activate")
 async def activate_file(parent_id: str) -> Dict[str, Any]:
@@ -516,4 +561,57 @@ async def delete_file(parent_id: str) -> Dict[str, Any]:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error deleting file: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error deleting file: {str(e)}")
+
+@app.get("/storage/usage")
+async def get_storage_usage() -> Dict[str, Any]:
+    """Get disk usage statistics for all files and versions."""
+    try:
+        usage_stats = version_manager.get_disk_usage_stats()
+        
+        # Format sizes for better readability
+        def format_size(size_bytes: int) -> Dict[str, Any]:
+            """Convert bytes to human readable format."""
+            if size_bytes == 0:
+                return {"bytes": 0, "readable": "0 B"}
+            
+            size_names = ["B", "KB", "MB", "GB", "TB"]
+            size = size_bytes
+            i = 0
+            while size >= 1024 and i < len(size_names) - 1:
+                size /= 1024.0
+                i += 1
+            
+            return {
+                "bytes": size_bytes,
+                "readable": f"{size:.1f} {size_names[i]}"
+            }
+        
+        # Format the response with readable sizes
+        formatted_stats = {
+            "total_size": format_size(usage_stats["total_size"]),
+            "total_files": usage_stats["total_files"],
+            "total_versions": usage_stats["total_versions"],
+            "file_breakdown": {}
+        }
+        
+        for parent_id, file_stats in usage_stats["file_stats"].items():
+            formatted_stats["file_breakdown"][parent_id] = {
+                "total_size": format_size(file_stats["total_size"]),
+                "version_count": file_stats["version_count"],
+                "versions": [
+                    {
+                        "version_id": version["version_id"],
+                        "name": version["name"],
+                        "size": format_size(version["size"]),
+                        "created_at": version["created_at"]
+                    }
+                    for version in file_stats["versions"]
+                ]
+            }
+        
+        return formatted_stats
+        
+    except Exception as e:
+        logger.error(f"Error getting storage usage: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error retrieving storage usage information") 
