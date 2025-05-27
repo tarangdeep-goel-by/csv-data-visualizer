@@ -35,6 +35,12 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
+# Health check endpoint for deployment monitoring
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for deployment monitoring."""
+    return {"status": "healthy", "timestamp": datetime.now(UTC).isoformat()}
+
 # Create data directory if it doesn't exist
 os.makedirs(settings.DATA_DIR, exist_ok=True)
 
@@ -53,8 +59,26 @@ def normalize_datetime(dt):
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)) -> Dict[str, Any]:
     """Upload and process a CSV file."""
-    if not file.filename.endswith('.csv') or file.content_type != "text/csv":
+    logger.info(f"Upload attempt - filename: {file.filename}, content_type: {file.content_type}, size: {file.size}")
+    
+    # Validate file extension (primary security check)
+    if not file.filename or not file.filename.endswith('.csv'):
+        logger.warning(f"File validation failed - invalid filename: {file.filename}")
         raise HTTPException(status_code=400, detail="Invalid file format. Only CSV files are supported.")
+    
+    # Allow common CSV content types (browsers may send different types)
+    allowed_content_types = {"text/csv", "application/csv", "text/plain", "application/vnd.ms-excel"}
+    if file.content_type and file.content_type not in allowed_content_types:
+        logger.warning(f"File validation failed - content_type: {file.content_type} not in allowed types: {allowed_content_types}")
+        # Try to validate by actually reading the content as CSV
+        try:
+            file.file.seek(0)  # Reset file pointer
+            test_df = pd.read_csv(file.file, nrows=1)  # Try to read first row
+            file.file.seek(0)  # Reset for actual processing
+            logger.info(f"Content validation passed - file appears to be valid CSV despite content_type: {file.content_type}")
+        except Exception as e:
+            logger.warning(f"Content validation failed - file doesn't appear to be CSV: {str(e)}")
+            raise HTTPException(status_code=400, detail="Invalid file format. File must be a valid CSV.")
     
     try:
         df = pd.read_csv(file.file)

@@ -3,7 +3,7 @@ import os
 
 class Settings(BaseSettings):
     DATA_DIR: str = "data"
-    ALLOWED_ORIGINS: list = ["http://localhost:5173"]
+    ALLOWED_ORIGINS: list = ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"]
     METADATA_FILENAME: str = "metadata.json"
     DATA_FILENAME: str = "original_data.csv"
     

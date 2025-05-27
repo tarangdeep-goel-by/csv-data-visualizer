@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react'
 import { 
   Box,
-  useTheme,
   Typography
 } from '@mui/material'
-import axios from 'axios'
+import { api, isAxiosError } from './utils/api'
 import { Upload } from './components/Upload'
 import { Metadata } from './components/Metadata'
 import { Data } from './components/Data'
@@ -15,7 +14,6 @@ import type { Version } from './components/VersionManager/types'
 import { FileManager, FileInfo } from './components/FileManager'
 
 function App() {
-  const theme = useTheme()
   const [file, setFile] = useState<File | null>(null)
   const [metadata, setMetadata] = useState<MetadataType | null>(null)
   const [completeData, setCompleteData] = useState<CompleteData | null>(null)
@@ -40,7 +38,6 @@ function App() {
   const [versions, setVersions] = useState<Version[]>([])
   const [currentVersionId, setCurrentVersionId] = useState<string | null>(null)
   const [parentId, setParentId] = useState<string | null>(null)
-  const [currentFileName, setCurrentFileName] = useState<string | null>(null)
   const [hasExistingFiles, setHasExistingFiles] = useState<boolean>(false)
   const [checkingForFiles, setCheckingForFiles] = useState<boolean>(true)
 
@@ -76,7 +73,7 @@ function App() {
     formData.append('file', file);
 
     try {
-      const response = await axios.post('http://localhost:8000/upload', formData);
+      const response = await api.post('/upload', formData);
       
       // Only validate metrics since dimensions can be added later
       if (response.data.column_classifications.metrics.length === 0) {
@@ -89,7 +86,6 @@ function App() {
       setParentId(response.data.parent_id);
       setCurrentVersionId(null);
       setVersions([]);
-      setCurrentFileName(file.name);
       setHasExistingFiles(true);
       
       // Initialize filter state with index dimension and all metrics
@@ -105,7 +101,7 @@ function App() {
       
       // Automatically create an initial version with the original filename
       try {
-        await axios.post(`http://localhost:8000/versions/save?parent_id=${response.data.parent_id}`, {
+        await api.post('/versions/save?parent_id=' + response.data.parent_id, {
           filter_criteria: initialFilterState,
           name: "Initial upload",
           description: file.name, // Save original filename in description
@@ -113,7 +109,7 @@ function App() {
         });
         
         // Fetch the updated versions list
-        const versionsResponse = await axios.get(`http://localhost:8000/versions/list?parent_id=${response.data.parent_id}`);
+        const versionsResponse = await api.get('/versions/list?parent_id=' + response.data.parent_id);
         setVersions(versionsResponse.data);
         if (versionsResponse.data.length > 0) {
           setCurrentVersionId(versionsResponse.data[0].id);
@@ -124,7 +120,7 @@ function App() {
       }
       
     } catch (err) {
-      if (axios.isAxiosError(err)) {
+      if (isAxiosError(err)) {
         const errorMessage = err.response?.data?.detail || err.message;
         setError(`Error uploading file: ${errorMessage}`);
       } else {
@@ -141,13 +137,13 @@ function App() {
       setLoading(true)
       const dataToSend = filterData || filterState
       console.log('Sending filter request:', dataToSend)
-      const response = await axios.post('http://localhost:8000/data/filter', dataToSend)
+      const response = await api.post('/data/filter', dataToSend)
       console.log('Received response:', response.data)
       setCompleteData(response.data)
       setError(null)
     } catch (err) {
       console.error('Error fetching complete data:', err)
-      if (axios.isAxiosError(err)) {
+      if (isAxiosError(err)) {
         setError(`Error fetching data: ${err.response?.data?.detail || err.message}`)
       } else {
         setError('Error fetching data. Please try again.')
@@ -159,7 +155,7 @@ function App() {
 
   const handleDownload = async () => {
     try {
-      const response = await axios.get('http://localhost:8000/download', {
+      const response = await api.get('/download', {
         responseType: 'blob'
       })
       
@@ -216,8 +212,8 @@ function App() {
 
     try {
       setLoading(true);
-      const response = await axios.put(
-        'http://localhost:8000/metadata/classifications',
+      const response = await api.put(
+        '/metadata/classifications',
         pendingMetadata.column_classifications
       );
       setMetadata(response.data);
@@ -272,8 +268,8 @@ function App() {
 
     try {
       setLoading(true);
-      const response = await axios.put(
-        'http://localhost:8000/metadata/dimension-flags',
+      const response = await api.put(
+        '/metadata/dimension-flags',
         pendingMetadata.dimension_flags
       );
       setMetadata(response.data);
@@ -293,7 +289,7 @@ function App() {
       await fetchCompleteData(newFilterState);
       setShowDimensionFlags(false);
     } catch (err) {
-      if (axios.isAxiosError(err)) {
+      if (isAxiosError(err)) {
         setError(`Error updating dimension flags: ${err.response?.data?.detail || err.message}`);
       } else {
         setError('Error updating dimension flags. Please try again.');
@@ -356,7 +352,7 @@ function App() {
 
   const handleDownloadFilteredView = async () => {
     try {
-      const response = await axios.post('http://localhost:8000/download/filtered', filterState, {
+      const response = await api.post('/download/filtered', filterState, {
         responseType: 'blob'
       });
       
@@ -392,7 +388,7 @@ function App() {
       setError(null);
       if (!parentId) throw new Error('No parentId set. Please upload a file first.');
       // Save current view as new version
-      const response = await axios.post(`http://localhost:8000/versions/save?parent_id=${parentId}`,
+      const response = await api.post('/versions/save?parent_id=' + parentId,
         {
           filter_criteria: filterState,  // Send filter state as a nested object
           name,
@@ -400,13 +396,13 @@ function App() {
         }
       );
       // Update versions list
-      const versionsResponse = await axios.get(`http://localhost:8000/versions/list?parent_id=${parentId}`);
+      const versionsResponse = await api.get('/versions/list?parent_id=' + parentId);
       setVersions(versionsResponse.data);
       // Set as current version
       setCurrentVersionId(response.data.id);
     } catch (err) {
       console.error('Error saving version:', err);
-      if (axios.isAxiosError(err)) {
+      if (isAxiosError(err)) {
         setError(`Error saving version: ${err.response?.data?.detail || err.message}`);
       } else {
         setError('Error saving version. Please try again.');
@@ -422,14 +418,14 @@ function App() {
       setError(null);
 
       // First, get the version details to retrieve the saved filter criteria
-      const versionResponse = await axios.get(`http://localhost:8000/versions/${versionId}`);
+      const versionResponse = await api.get('/versions/' + versionId);
       const version = versionResponse.data;
 
       // Activate the version's snapshot as the current data file
-      await axios.post(`http://localhost:8000/versions/${versionId}/activate`);
+      await api.post('/versions/' + versionId + '/activate');
 
       // Fetch the new metadata (as if a new file was uploaded)
-      const metadataResponse = await axios.get('http://localhost:8000/metadata');
+      const metadataResponse = await api.get('/metadata');
       const newMetadata = metadataResponse.data;
       setMetadata(newMetadata);
       setPendingMetadata(newMetadata);
@@ -447,7 +443,7 @@ function App() {
 
     } catch (err) {
       console.error('Error loading version:', err);
-      if (axios.isAxiosError(err)) {
+      if (isAxiosError(err)) {
         setError(`Error loading version: ${err.response?.data?.detail || err.message}`);
       } else {
         setError('Error loading version. Please try again.');
@@ -463,9 +459,9 @@ function App() {
       setError(null);
       if (!parentId) throw new Error('No parentId set. Please upload a file first.');
       // Delete version
-      await axios.delete(`http://localhost:8000/versions/${versionId}`);
+      await api.delete('/versions/' + versionId);
       // Update versions list
-      const versionsResponse = await axios.get(`http://localhost:8000/versions/list?parent_id=${parentId}`);
+      const versionsResponse = await api.get('/versions/list?parent_id=' + parentId);
       setVersions(versionsResponse.data);
       // If deleted version was current, reset to original
       if (versionId === currentVersionId) {
@@ -475,7 +471,7 @@ function App() {
       }
     } catch (err) {
       console.error('Error deleting version:', err);
-      if (axios.isAxiosError(err)) {
+      if (isAxiosError(err)) {
         setError(`Error deleting version: ${err.response?.data?.detail || err.message}`);
       } else {
         setError('Error deleting version. Please try again.');
@@ -490,7 +486,7 @@ function App() {
     const fetchVersions = async () => {
       if (metadata && parentId) {  // Only fetch versions if we have data loaded and parentId
         try {
-          const response = await axios.get(`http://localhost:8000/versions/list?parent_id=${parentId}`);
+          const response = await api.get('/versions/list?parent_id=' + parentId);
           setVersions(response.data);
         } catch (err) {
           console.error('Error fetching versions:', err);
@@ -501,20 +497,16 @@ function App() {
   }, [metadata, parentId]);  // Re-fetch when metadata or parentId changes
 
   // File activation handler
-  const handleFileActivate = async (newParentId: string, fileInfo: FileInfo) => {
+  const handleFileActivate = async (newParentId: string, _fileInfo: FileInfo) => {
     try {
       setLoading(true);
       setError(null);
 
       // Activate the file (loads most recent version)
-      const response = await axios.post(`http://localhost:8000/files/${newParentId}/activate`);
+      const response = await api.post('/files/' + newParentId + '/activate');
       
       // Set the new context
       setParentId(newParentId);
-      setCurrentFileName(fileInfo.original_filename || fileInfo.first_version_name);
-      setMetadata(response.data.metadata);
-      setPendingMetadata(response.data.metadata);
-      setCurrentVersionId(response.data.activated_version.id);
       setHasExistingFiles(true);
 
       // Restore the filter state from the activated version (most recent version of this file)
@@ -527,7 +519,7 @@ function App() {
 
     } catch (err) {
       console.error('Error activating file:', err);
-      if (axios.isAxiosError(err)) {
+      if (isAxiosError(err)) {
         setError(`Error switching to file: ${err.response?.data?.detail || err.message}`);
       } else {
         setError('Error switching to file. Please try again.');
@@ -544,7 +536,6 @@ function App() {
     setPendingMetadata(null);
     setCompleteData(null);
     setParentId(null);
-    setCurrentFileName(null);
     setCurrentVersionId(null);
     setVersions([]);
     setFilterState({
@@ -563,7 +554,7 @@ function App() {
     // Recheck for existing files after deletion
     const recheckFiles = async () => {
       try {
-        const response = await axios.get('http://localhost:8000/files/check');
+        const response = await api.get('/files/check');
         setHasExistingFiles(response.data.has_existing_files);
       } catch (err) {
         console.error('Error rechecking for existing files:', err);
@@ -577,7 +568,7 @@ function App() {
   useEffect(() => {
     const checkForExistingFiles = async () => {
       try {
-        const response = await axios.get('http://localhost:8000/files/check');
+        const response = await api.get('/files/check');
         setHasExistingFiles(response.data.has_existing_files);
       } catch (err) {
         console.error('Error checking for existing files:', err);

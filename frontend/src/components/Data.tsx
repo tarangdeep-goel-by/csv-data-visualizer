@@ -17,14 +17,11 @@ import {
   DialogActions,
   Box,
   Chip,
-  Tooltip,
-  Badge
+  Tooltip
 } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import FilterListIcon from '@mui/icons-material/FilterList'
-import KeyIcon from '@mui/icons-material/Key'
-import AccessTimeIcon from '@mui/icons-material/AccessTime'
-import { Metadata as MetadataType, CompleteData, FilterState, ColumnFilter, ValueFilter, RangeFilter } from './types'
+import { Metadata as MetadataType, CompleteData, FilterState, ColumnFilter } from './types'
 import { Filter } from './Filter'
 import { useState } from 'react'
 
@@ -96,30 +93,6 @@ export const Data = ({
   const [showFilterDialog, setShowFilterDialog] = useState(false);
 
   if (!metadata || !completeData) return null;
-
-  const renderColumnHeader = (column: string) => {
-    const isIndex = metadata.dimension_flags.index_dimension === column;
-    const isTime = metadata.dimension_flags.time_dimension === column;
-    const isMetric = metadata.column_classifications.metrics.includes(column);
-
-    return (
-      <Stack direction="row" spacing={1} alignItems="center">
-        <span>{column}</span>
-        <Stack direction="row" spacing={0.5}>
-          {isIndex && (
-            <Tooltip title="Index Dimension">
-              <KeyIcon sx={{ fontSize: 16, color: 'warning.main' }} />
-            </Tooltip>
-          )}
-          {isTime && (
-            <Tooltip title="Time Dimension">
-              <AccessTimeIcon sx={{ fontSize: 16, color: 'info.main' }} />
-            </Tooltip>
-          )}
-        </Stack>
-      </Stack>
-    );
-  };
 
   return (
     <Paper 

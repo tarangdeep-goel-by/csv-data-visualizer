@@ -1,19 +1,17 @@
-import { 
-  Paper, 
-  Typography, 
-  Button, 
+import {
+  Paper,
+  Typography,
+  Button,
   Stack,
   CircularProgress,
-  Chip,
   Alert,
   Box,
   IconButton,
   Tooltip
 } from '@mui/material'
-import UploadFileIcon from '@mui/icons-material/UploadFile'
+import { CloudUpload } from '@mui/icons-material'
 import AddIcon from '@mui/icons-material/Add'
 import MoreHorizIcon from '@mui/icons-material/MoreHoriz'
-import { AppProps } from './types'
 
 interface UploadProps {
   file: File | null
@@ -46,7 +44,7 @@ export const Upload = ({ file, loading, error, onFileChange, onUpload, onDownloa
               variant="outlined"
               onClick={onDownload}
               disabled={loading}
-              startIcon={<UploadFileIcon />}
+              startIcon={<CloudUpload />}
             >
               Download
             </Button>
@@ -96,7 +94,7 @@ export const Upload = ({ file, loading, error, onFileChange, onUpload, onDownloa
                   onUpload();
                 }}
                 disabled={loading}
-                startIcon={loading ? <CircularProgress size={20} /> : <UploadFileIcon />}
+                startIcon={loading ? <CircularProgress size={20} /> : <CloudUpload />}
               >
                 Upload File
               </Button>

@@ -1,23 +1,28 @@
-import React, { useState, useEffect } from 'react';
-import { 
-    Button, 
-    Dialog, 
-    DialogTitle, 
-    DialogContent, 
-    DialogActions, 
-    TextField, 
-    List, 
-    ListItem, 
-    ListItemText, 
-    ListItemSecondaryAction, 
+import React, { useState } from 'react';
+import {
+    Button,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogActions,
+    TextField,
+    List,
+    ListItem,
+    ListItemText,
+    ListItemSecondaryAction,
     IconButton,
     Typography,
-    Chip,
-    Box
+    Box,
+    Chip
 } from '@mui/material';
-import { Save as SaveIcon, Delete as DeleteIcon, History as HistoryIcon, Storage as StorageIcon } from '@mui/icons-material';
-import { Version } from './types';
-import axios from 'axios';
+import {
+    Save as SaveIcon,
+    History as HistoryIcon,
+    Delete as DeleteIcon,
+    Storage as StorageIcon
+} from '@mui/icons-material';
+import { api } from '../../utils/api';
+import type { Version } from './types';
 
 interface StorageUsage {
     total_size: {
@@ -71,7 +76,7 @@ export const VersionManager: React.FC<VersionManagerProps> = ({
 
     const fetchStorageUsage = async () => {
         try {
-            const response = await axios.get('http://localhost:8000/storage/usage');
+            const response = await api.get('storage/usage');
             setStorageUsage(response.data);
         } catch (err) {
             console.error('Error fetching storage usage:', err);

@@ -1,0 +1,105 @@
+name: Deploy CSV Data Visualizer
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: Test Application
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Test backend
+        run: |
+          cd backend
+          python -m pytest
+
+      - name: Test frontend build
+        run: |
+          cd frontend
+          npm run build
+
+      - name: Test Docker build
+        run: |
+          docker build -t csv-visualizer-backend:test .
+
+  deploy-backend:
+    needs: test
+    runs-on: ubuntu-latest
+    name: Deploy Backend to Railway
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Railway
+        uses: railway-community/railway-action@v1
+        with:
+          railway-token: ${{ secrets.RAILWAY_TOKEN }}
+          service: backend
+
+  deploy-frontend:
+    needs: test
+    runs-on: ubuntu-latest
+    name: Deploy Frontend to Vercel
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          working-directory: ./frontend
+
+  notify:
+    needs: [deploy-backend, deploy-frontend]
+    runs-on: ubuntu-latest
+    name: Deployment Notification
+    if: always() && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Notify deployment status
+        run: |
+          if [ "${{ needs.deploy-backend.result }}" = "success" ] && [ "${{ needs.deploy-frontend.result }}" = "success" ]; then
+            echo "✅ Deployment successful!"
+            echo "Backend: Deployed to Railway"
+            echo "Frontend: Deployed to Vercel"
+          else
+            echo "❌ Deployment failed!"
+            echo "Backend status: ${{ needs.deploy-backend.result }}"
+            echo "Frontend status: ${{ needs.deploy-frontend.result }}"
+          fi 

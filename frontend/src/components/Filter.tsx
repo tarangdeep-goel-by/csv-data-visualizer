@@ -12,14 +12,13 @@ import {
   TextField,
   Box,
   Chip,
-  IconButton,
   Typography,
   CircularProgress,
   Stack,
 } from '@mui/material';
 import { Delete as DeleteIcon, Filter as FilterIcon, Add as AddIcon } from '@mui/icons-material';
 import { FilterState, ColumnFilter, ValueFilter, RangeFilter, Metadata } from './types';
-import axios from 'axios';
+import { api } from '../utils/api';
 
 interface FilterProps {
   open: boolean;
@@ -67,8 +66,8 @@ export const Filter: React.FC<FilterProps> = ({
             }
           : filterState;
 
-        const response = await axios.post(
-          `http://localhost:8000/data/unique-values/${selectedColumn}`,
+        const response = await api.post(
+          `/data/unique-values/${selectedColumn}`,
           filterStateForFetch
         );
         setUniqueValues(response.data.values);

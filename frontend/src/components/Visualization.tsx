@@ -2,15 +2,13 @@ import React from 'react';
 import {
   Paper,
   Typography,
+  Stack,
   Box,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
-  Chip,
-  Stack,
-  CircularProgress,
-  useTheme
+  CircularProgress
 } from '@mui/material';
 import {
   LineChart,
@@ -40,16 +38,7 @@ export const Visualization: React.FC<VisualizationProps> = ({
   filterState,
   onVisualizationMetricsChange
 }) => {
-  const theme = useTheme();
-
   if (!metadata || !completeData) return null;
-
-  const handleMetricToggle = (metric: string) => {
-    const newMetrics = filterState.visualization_metrics.includes(metric)
-      ? filterState.visualization_metrics.filter(m => m !== metric)
-      : [...filterState.visualization_metrics, metric];
-    onVisualizationMetricsChange(newMetrics);
-  };
 
   // Get color for a metric based on its index
   const getMetricColor = (index: number) => {

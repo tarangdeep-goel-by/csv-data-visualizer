@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
     Button,
     Dialog,
@@ -8,7 +8,6 @@ import {
     List,
     ListItem,
     ListItemText,
-    ListItemSecondaryAction,
     IconButton,
     Typography,
     Box,
@@ -26,14 +25,13 @@ import {
 import {
     Folder as FolderIcon,
     History as HistoryIcon,
-    TableChart as TableIcon,
     Close as CloseIcon,
     Delete as DeleteIcon,
     InsertDriveFile as FileIcon,
     Storage as StorageIcon,
     ExpandMore as ExpandMoreIcon
 } from '@mui/icons-material';
-import axios from 'axios';
+import { api, isAxiosError } from '../../utils/api';
 
 export interface FileInfo {
     parent_id: string;
@@ -92,17 +90,16 @@ export const FileManager: React.FC<FileManagerProps> = ({
     const [error, setError] = useState<string | null>(null);
     const [deletingFileId, setDeletingFileId] = useState<string | null>(null);
     const [storageUsage, setStorageUsage] = useState<StorageUsage | null>(null);
-    const [loadingStorage, setLoadingStorage] = useState(false);
 
     const fetchFiles = async () => {
         try {
             setLoading(true);
             setError(null);
-            const response = await axios.get('http://localhost:8000/files/list');
+            const response = await api.get('/files/list');
             setFiles(response.data);
         } catch (err) {
             console.error('Error fetching files:', err);
-            if (axios.isAxiosError(err)) {
+            if (isAxiosError(err)) {
                 setError(`Error fetching files: ${err.response?.data?.detail || err.message}`);
             } else {
                 setError('Error fetching files. Please try again.');
@@ -114,14 +111,11 @@ export const FileManager: React.FC<FileManagerProps> = ({
 
     const fetchStorageUsage = async () => {
         try {
-            setLoadingStorage(true);
-            const response = await axios.get('http://localhost:8000/storage/usage');
+            const response = await api.get('/storage/usage');
             setStorageUsage(response.data);
         } catch (err) {
             console.error('Error fetching storage usage:', err);
             // Don't show error for storage usage as it's supplementary info
-        } finally {
-            setLoadingStorage(false);
         }
     };
 
@@ -152,7 +146,7 @@ export const FileManager: React.FC<FileManagerProps> = ({
             setDeletingFileId(fileInfo.parent_id);
             setError(null);
             
-            const response = await axios.delete(`http://localhost:8000/files/${fileInfo.parent_id}`);
+            const response = await api.delete(`/files/${fileInfo.parent_id}`);
             
             // Refresh the files list
             await fetchFiles();
@@ -168,7 +162,7 @@ export const FileManager: React.FC<FileManagerProps> = ({
             console.log('File deleted successfully:', response.data.message);
         } catch (err) {
             console.error('Error deleting file:', err);
-            if (axios.isAxiosError(err)) {
+            if (isAxiosError(err)) {
                 setError(`Error deleting file: ${err.response?.data?.detail || err.message}`);
             } else {
                 setError('Error deleting file. Please try again.');
