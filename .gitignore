@@ -20,6 +20,7 @@ wheels/
 .installed.cfg
 *.egg
 venv/
+venv311/
 .env
 
 # React Frontend
@@ -27,14 +28,34 @@ node_modules/
 /frontend/dist
 /frontend/.vite
 *.local
-.DS_Store
 
-# Data files
+# Data files (user data should not be committed)
+/data/
 /backend/data/
 *.csv
 
-# IDE
+# Cache directories
+.pytest_cache/
+/backend/.pytest_cache/
+/backend/.coverage
+/backend/htmlcov/
+
+# Local development environment files
+/backend/.env
+/frontend/.env.local
+
+# IDE and OS
 .idea/
 .vscode/
 *.swp
-*.swo 
+*.swo
+.DS_Store
+
+# Docker volumes and logs
+/docker-logs/
+
+# Temporary files
+*.tmp
+*.temp
+test.csv
+test.txt 

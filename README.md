@@ -1,76 +1,93 @@
 # CSV Data Visualizer
 
-A modern web application for visualizing and analyzing CSV data. Built with React, TypeScript, and Python FastAPI.
+A modern web application for visualizing and analyzing CSV data with advanced file versioning and filtering capabilities. Built with React, TypeScript, and Python FastAPI.
 
-## Features
+## ✨ Features
 
-- CSV file upload and download
-- Automatic metadata extraction
-- Interactive data visualization
-- Sample data preview
-- Modern, responsive UI
+- **CSV file upload and processing** with robust validation
+- **File versioning system** - Save and restore different data states
+- **Advanced filtering and visualization** with interactive charts
+- **Column classification** - Automatically detect dimensions and metrics
+- **Data export** - Download filtered datasets
+- **Real-time data preview** with pagination
+- **Modern, responsive UI** built with Material-UI
+- **Docker support** for consistent development and deployment
 
-## Tech Stack
+## 🛠️ Tech Stack
 
 ### Frontend
-- React with TypeScript
-- Material-UI (MUI)
-- Axios for API calls
-- Vite for build tooling
+- React 18 with TypeScript
+- Material-UI (MUI) v6
+- Recharts for data visualization
+- Axios for API communication
+- Vite for fast development and building
 
 ### Backend
-- Python FastAPI
+- Python FastAPI with async support
 - Pandas for data manipulation
-- CORS support
-- File handling capabilities
+- File versioning and metadata management
+- CORS and security features
+- Comprehensive test suite (38 tests)
 
-## Getting Started
+### Infrastructure
+- Docker and Docker Compose
+- CI/CD pipelines (GitHub Actions)
+- Cloud deployment ready (Railway, Vercel, AWS)
 
-### Prerequisites
-- Node.js (v14 or higher)
-- Python 3.8 or higher
-- pip (Python package manager)
+## 🚀 Quick Start (Docker - Recommended)
 
-### Installation
+The fastest way to get started is with Docker:
 
-1. Clone the repository:
 ```bash
+# Clone the repository
 git clone <repository-url>
 cd csv-data-visualizer
+
+# Start the application
+docker-compose up
+
+# Access the application
+# Frontend: http://localhost:5173
+# Backend API: http://localhost:8000
 ```
 
-2. Set up the backend:
+## 📖 Documentation
+
+- **[Development Guide](./DEVELOPMENT.md)** - Complete guide for Docker and local development
+- **[Deployment Guide](./DEPLOYMENT.md)** - Production deployment instructions
+- **[API Documentation](http://localhost:8000/docs)** - Interactive API docs (when running)
+
+## 🏗️ Development
+
+Choose your preferred development environment:
+
+### Option 1: Docker Development (Recommended)
 ```bash
-cd backend
+docker-compose up
+```
+See [DEVELOPMENT.md](./DEVELOPMENT.md) for complete Docker workflows.
+
+### Option 2: Local Development
+```bash
+# Backend
 python -m venv venv
-source venv/bin/activate  # On Windows: .\venv\Scripts\activate
-pip install -r requirements.txt
-```
+source venv/bin/activate
+cd backend && pip install -r requirements.txt
+python -m uvicorn app.main:app --reload
 
-3. Set up the frontend:
-```bash
-cd frontend
-npm install
-```
-
-### Running the Application
-
-1. Start the backend server:
-```bash
-cd backend
-source venv/bin/activate  # On Windows: .\venv\Scripts\activate
-uvicorn app.main:app --reload
-```
-
-2. Start the frontend development server:
-```bash
-cd frontend
+# Frontend (new terminal)
+cd frontend && npm install
 npm run dev
 ```
 
-The application will be available at:
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:8000
+### Running Tests
+```bash
+# Docker
+docker-compose exec backend python -m pytest
+
+# Local
+cd backend && python -m pytest
+```
 
 ## Development
 
