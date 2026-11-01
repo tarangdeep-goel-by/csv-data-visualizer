@@ -117,3 +117,6 @@ cd backend && python -m pytest
 ## License
 
 This project is licensed under the MIT License. 
+## What came next
+
+The last commit here is from May 2025. The next take on the same problem, asking questions of a CSV, is [ai-data-analyst-v2](https://github.com/tarangdeep-goel-by/ai-data-analyst-v2) (January 2026): instead of hand-built filters and charts, Gemini writes pandas code for each question. Its `docs/NOTES.md` has the full history, including this repo.
